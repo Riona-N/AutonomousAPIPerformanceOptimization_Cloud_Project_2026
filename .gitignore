@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Stable-Baselines3 local artifacts
+results/toy_ppo_*.zip

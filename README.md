@@ -128,3 +128,16 @@ Prior RL-for-API/payment literature solves narrow, single-domain problems in iso
 - **Full automation** versus existing monitoring-only, alert-based systems.
 - **Joint metric improvement** (success rate, P95 latency, SLA-violation rate) rather than single-metric optimization.
 - **Reproducible evaluation** on an open dataset (PaySim + open microservice traces) rather than proprietary production-only data.
+
+## Role 1: Toy RL Agent
+
+The first RL prototype uses [Stable-Baselines3](https://stable-baselines3.readthedocs.io/) with PPO on a small Gymnasium API-routing environment. The environment simulates three backends and exposes normalized latency, load, success rate, and request-risk features. The agent chooses a backend and is rewarded for successful, low-latency, non-overloaded requests.
+
+Install the Python dependencies and run a short experiment from the repository root:
+
+```bash
+python -m pip install -r requirements.txt
+python -m src.ml_model.train_toy_agent --timesteps 5000
+```
+
+The runner saves the trained model (ignored by Git) to `results/toy_ppo_agent.zip` and evaluation metrics to `results/toy_ppo_metrics.json`. This is a tooling prototype, not a production policy or a replacement for the later PaySim and infrastructure-trace environment.
