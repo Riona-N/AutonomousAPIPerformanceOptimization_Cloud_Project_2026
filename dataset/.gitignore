@@ -1,0 +1,10 @@
+# raw data is downloaded, never committed (keep only the README)
+raw/*
+!raw/README.md
+
+# scratch space and large generated tables (regenerate with the scripts; too big for GitHub)
+processed/duckdb_tmp/
+processed/paysim_features.parquet
+processed/paysim_clean.parquet
+processed/paysim_train_undersampled.parquet
+processed/linkage_tx.parquet
