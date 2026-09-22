@@ -13,7 +13,10 @@ are a lump of near-zero calls plus a long tail, which a lognormal fits badly).
 import numpy as np
 import pandas as pd
 
-from config import STAGES
+try:
+    from config import STAGES
+except ImportError:
+    from src.config import STAGES
 
 # Quantile grid stored per (stage, candidate, window). A uniform draw u is mapped through it by linear interpolation.
 QUANTILE_LEVELS = np.array([0.0, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99, 0.999])
