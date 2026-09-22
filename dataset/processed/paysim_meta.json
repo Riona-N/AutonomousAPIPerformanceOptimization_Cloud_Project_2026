@@ -1,0 +1,42 @@
+{
+  "rows_clean": 6362620,
+  "split_steps": {
+    "train": [
+      1,
+      520
+    ],
+    "val": [
+      521,
+      631
+    ],
+    "test": [
+      632,
+      743
+    ]
+  },
+  "rows_per_split": {
+    "train": 6082007,
+    "val": 191147,
+    "test": 89466
+  },
+  "fraud_per_split": {
+    "test": 1252,
+    "train": 5781,
+    "val": 1180
+  },
+  "train_pos": 5781,
+  "train_neg": 6076226,
+  "scale_pos_weight": 1051.07,
+  "features_for_fraud_risk": [
+    "type_CASH_IN",
+    "type_CASH_OUT",
+    "type_DEBIT",
+    "type_PAYMENT",
+    "type_TRANSFER",
+    "log_amount",
+    "orig_bal_err",
+    "orig_zeroed",
+    "dest_is_merchant"
+  ],
+  "threshold": 0.8458
+}
