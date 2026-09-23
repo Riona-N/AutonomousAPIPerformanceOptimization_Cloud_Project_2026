@@ -1,0 +1,3 @@
+method,average_latency_ms,p95_latency_ms,sla_violation_rate,average_reward,windows_evaluated
+rule_based,151.95242223575192,347.2068484683563,0.0,-151.95242223575192,150
+epsilon_greedy_bandit,150.98504267928837,350.6376711250987,0.0,-150.98504267928837,150
