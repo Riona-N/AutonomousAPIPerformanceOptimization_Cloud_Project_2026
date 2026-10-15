@@ -130,16 +130,34 @@ def make_result(method, stage, window_id, candidate, selected, seed=None):
 # RULE-BASED BASELINE
 # --------------------------------------------------
 
-def evaluate_rule_based(windows, candidates):
+def evaluate_rule_based(train_windows, test_windows, seed=None):
     print("Running rule-based baseline...")
 
-    policy = build_rule_policy(candidates)
+    # Learn the best candidate using training windows only.
+    training_summary = (
+        train_windows.groupby(["stage", "cand_rank"])["p95"]
+        .mean()
+        .reset_index()
+    )
+
+    best_candidates = (
+        training_summary.sort_values(
+            ["stage", "p95", "cand_rank"]
+        )
+        .drop_duplicates(subset=["stage"])
+        .set_index("stage")["cand_rank"]
+        .to_dict()
+    )
+
     results = []
 
-    for stage in sorted(windows["stage"].unique()):
-        stage_data = windows[windows["stage"] == stage]
+    # Evaluate the fixed policy on test windows only.
+    for stage in sorted(test_windows["stage"].unique()):
+        stage_data = test_windows[
+            test_windows["stage"] == stage
+        ]
 
-        candidate = choose_candidate(policy, stage)
+        candidate = int(best_candidates[stage])
 
         for window_id in sorted(stage_data["window_id"].unique()):
             window_data = stage_data[
@@ -160,6 +178,7 @@ def evaluate_rule_based(windows, candidates):
                     window_id,
                     candidate,
                     selected.iloc[0],
+                    seed=seed,
                 )
             )
 
