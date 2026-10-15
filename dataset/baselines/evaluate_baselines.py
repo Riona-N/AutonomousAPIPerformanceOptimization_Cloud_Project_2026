@@ -1,12 +1,17 @@
-from time_split import chronological_split
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from rule_based import build_rule_policy, choose_candidate
-from bandit import EpsilonGreedyBandit, UCB1, ThompsonSampling
-
+from dataset.baselines.time_split import chronological_split
+from dataset.baselines.rule_based import build_rule_policy, choose_candidate
+from dataset.baselines.bandit import EpsilonGreedyBandit, UCB1, ThompsonSampling
+from dataset.baselines.additional_policies import (
+    RandomRouting,
+    LeastLoaded,
+    PowerOfTwoChoices,
+    LinUCB,
+)
 
 # --------------------------------------------------
 # FILE PATHS
@@ -290,6 +295,177 @@ def evaluate_bandit_policy(windows, method, seed, epsilon=None):
 # CALCULATE SUMMARY METRICS
 # --------------------------------------------------
 
+def evaluate_count_policy(windows, method, seed):
+    """Evaluate random and count-based routing policies."""
+
+    results = []
+    policies = {}
+
+    # Give each stage its own routing policy.
+    for stage in windows["stage"].unique():
+        if method == "random":
+            policies[stage] = RandomRouting(seed=seed)
+
+        elif method == "least_loaded":
+            policies[stage] = LeastLoaded(seed=seed)
+
+        elif method == "power_of_two_choices":
+            policies[stage] = PowerOfTwoChoices(seed=seed)
+
+        else:
+            raise ValueError(f"Unknown policy: {method}")
+
+    # Evaluate windows chronologically.
+    ordered = windows.sort_values(["window_id", "stage"])
+
+    for (stage, window_id), group in ordered.groupby(
+        ["stage", "window_id"], sort=False
+    ):
+        policy = policies[stage]
+
+        candidates = sorted(
+            group["cand_rank"].astype(int).unique().tolist()
+        )
+
+        candidate = policy.choose(candidates)
+
+        selected = group[
+            group["cand_rank"].astype(int) == candidate
+        ].iloc[0]
+
+        latency = float(selected["p95"])
+
+        results.append({
+            "method": method,
+            "seed": seed,
+            "stage": stage,
+            "window_id": window_id,
+            "candidate": candidate,
+            "latency_ms": latency,
+            "sla_violation": int(selected["sla_violation"]),
+            "reward": -latency,
+        })
+
+        # Update routing counts after making the selection.
+        if hasattr(policy, "update"):
+            policy.update(candidate)
+
+    return pd.DataFrame(results)
+
+def evaluate_linucb(train_windows, test_windows, seed):
+    """Evaluate LinUCB using candidate features learned from training data."""
+
+    feature_columns = [
+        "n_calls",
+        "mean_ms",
+        "p50",
+        "p95",
+        "p99",
+    ]
+
+    # Candidate features are calculated from training data only.
+    candidate_summary = (
+        train_windows.groupby(["stage", "cand_rank"])[feature_columns]
+        .mean()
+        .reset_index()
+    )
+
+    policies = {}
+    results = []
+
+    for stage, group in candidate_summary.groupby("stage"):
+        candidates = sorted(group["cand_rank"].astype(int).unique())
+
+        values = group.set_index("cand_rank")[feature_columns]
+        values = values.loc[candidates].astype(float)
+
+        # Log-transform counts and standardize features within each stage.
+        values["n_calls"] = np.log1p(values["n_calls"].clip(lower=0))
+
+        means = values.mean()
+        stds = values.std(ddof=0).replace(0, 1)
+        values = (values - means) / stds
+
+        # Add an intercept feature.
+        values.insert(0, "intercept", 1.0)
+
+        candidate_features = {
+            candidate: values.loc[candidate].to_numpy(dtype=float)
+            for candidate in candidates
+        }
+
+        policies[stage] = LinUCB(
+            candidate_features=candidate_features,
+            alpha=1.0,
+        )
+
+    # Only test-window outcomes are used as feedback after selection.
+    ordered = test_windows.sort_values(["window_id", "stage"])
+
+    for (stage, window_id), group in ordered.groupby(
+        ["stage", "window_id"], sort=False
+    ):
+        policy = policies[stage]
+
+        candidates = sorted(
+            group["cand_rank"].astype(int).unique().tolist()
+        )
+
+        candidate = policy.choose(candidates)
+
+        selected = group[
+            group["cand_rank"].astype(int) == candidate
+        ].iloc[0]
+
+        latency = float(selected["p95"])
+        reward = learning_reward(stage, latency)
+
+        results.append({
+            "method": "linucb",
+            "seed": seed,
+            "stage": stage,
+            "window_id": window_id,
+            "candidate": candidate,
+            "latency_ms": latency,
+            "sla_violation": int(selected["sla_violation"]),
+            "reward": -latency,
+        })
+
+        policy.update(candidate, reward)
+
+    return pd.DataFrame(results)
+
+
+def evaluate_oracle(test_windows, seed):
+    """
+    Optimistic reference: select the candidate with the lowest
+    observed P95 latency for each stage-window.
+
+    This uses the outcome being evaluated, so it is not deployable.
+    """
+
+    results = []
+
+    ordered = test_windows.sort_values(["window_id", "stage"])
+
+    for (stage, window_id), group in ordered.groupby(
+        ["stage", "window_id"], sort=False
+    ):
+        selected = group.loc[group["p95"].idxmin()]
+
+        results.append({
+            "method": "oracle",
+            "seed": seed,
+            "stage": stage,
+            "window_id": window_id,
+            "candidate": int(selected["cand_rank"]),
+            "latency_ms": float(selected["p95"]),
+            "sla_violation": int(selected["sla_violation"]),
+            "reward": -float(selected["p95"]),
+        })
+
+    return pd.DataFrame(results)
+
 def calculate_metrics(results):
     summary = []
 
@@ -321,7 +497,7 @@ def main():
     windows, candidates = load_data()
     windows = prepare_windows(windows)
 
-    # Split windows chronologically
+    # Split the data in chronological order.
     train, validation, test = chronological_split(windows)
 
     print("\nCHRONOLOGICAL DATA SPLIT")
@@ -329,17 +505,28 @@ def main():
     print(f"Validation windows: {sorted(validation['window_id'].unique())}")
     print(f"Test windows: {sorted(test['window_id'].unique())}")
 
-    # For this first integration, evaluate the policies on the
-    # held-out test windows. Bandit warm-up/learning is handled
-    # separately in the next step.
-    rule_results = evaluate_rule_based(test, candidates)
+    if train.empty or validation.empty or test.empty:
+        raise ValueError(
+            "Training, validation, and test splits must all contain data."
+        )
 
-    all_results = [rule_results]
+    all_results = []
 
+    # Evaluate every method with the required five seeds.
     for seed in SEEDS:
-        print(f"Evaluating test windows with seed {seed}...")
+        print(f"\nEvaluating seed {seed}...")
 
+        # 1. Rule-based baseline
+        rule_results = evaluate_rule_based(
+            train_windows=train,
+            test_windows=test,
+            seed=seed,
+        )
+        all_results.append(rule_results)
+
+        # 2. Epsilon-greedy baselines
         for epsilon in EPSILONS:
+            print(f"Running epsilon-greedy (epsilon={epsilon})...")
             result = evaluate_bandit_policy(
                 test,
                 method="epsilon_greedy",
@@ -348,7 +535,9 @@ def main():
             )
             all_results.append(result)
 
+        # 3. UCB1 and Thompson sampling
         for method in ["ucb1", "thompson_sampling"]:
+            print(f"Running {method} baseline...")
             result = evaluate_bandit_policy(
                 test,
                 method=method,
@@ -356,21 +545,63 @@ def main():
             )
             all_results.append(result)
 
+        # 4. Random, least-loaded, and power-of-two choices
+        for method in [
+            "random",
+            "least_loaded",
+            "power_of_two_choices",
+        ]:
+            print(f"Running {method} baseline...")
+            result = evaluate_count_policy(
+                windows=test,
+                method=method,
+                seed=seed,
+            )
+            all_results.append(result)
+
+        # 5. LinUCB — exactly once per seed
+        print("Running LinUCB baseline...")
+        all_results.append(
+            evaluate_linucb(
+                train_windows=train,
+                test_windows=test,
+                seed=seed,
+            )
+        )
+
+        # 6. Oracle — exactly once per seed
+        print("Running oracle reference...")
+        all_results.append(
+            evaluate_oracle(
+                test_windows=test,
+                seed=seed,
+            )
+        )
+
     detailed = pd.concat(all_results, ignore_index=True)
     summary = calculate_metrics(detailed)
 
-    detailed_path = RESULTS_DIR / "baseline_test_detailed_results.csv"
-    summary_path = RESULTS_DIR / "baseline_test_comparison.csv"
+    detailed_path = RESULTS_DIR / "baseline_test_detailed_results_v5.csv"
+    summary_path = RESULTS_DIR / "baseline_test_comparison_v5.csv"
+
+    for path in [detailed_path, summary_path]:
+        if path.exists():
+            raise FileExistsError(
+                f"{path} already exists. Preserve it and choose new "
+                "output filenames before running again."
+            )
 
     detailed.to_csv(detailed_path, index=False)
     summary.to_csv(summary_path, index=False)
 
     print("\nHELD-OUT TEST RESULTS")
     print("=" * 75)
-    print(summary.to_string(
-        index=False,
-        float_format=lambda value: f"{value:.4f}",
-    ))
+    print(
+        summary.to_string(
+            index=False,
+            float_format=lambda value: f"{value:.4f}",
+        )
+    )
 
     print("\nSaved detailed test results to:")
     print(detailed_path)
