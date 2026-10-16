@@ -517,6 +517,7 @@ def main():
         print(f"\nEvaluating seed {seed}...")
 
         # 1. Rule-based baseline
+        print("Running rule-based baseline...")
         rule_results = evaluate_rule_based(
             train_windows=train,
             test_windows=test,
@@ -581,8 +582,10 @@ def main():
     detailed = pd.concat(all_results, ignore_index=True)
     summary = calculate_metrics(detailed)
 
-    detailed_path = RESULTS_DIR / "baseline_test_detailed_results_v5.csv"
-    summary_path = RESULTS_DIR / "baseline_test_comparison_v5.csv"
+    run_id = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S_%f")
+
+    detailed_path = RESULTS_DIR / f"baseline_test_detailed_results_{run_id}.csv"
+    summary_path = RESULTS_DIR / f"baseline_test_comparison_{run_id}.csv"
 
     for path in [detailed_path, summary_path]:
         if path.exists():
