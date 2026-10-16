@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Large generated linkage datasets
+dataset/processed/linkage_seed_*/linkage_tx.parquet
