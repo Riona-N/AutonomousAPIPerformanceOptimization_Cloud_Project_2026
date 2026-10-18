@@ -466,25 +466,82 @@ def evaluate_oracle(test_windows, seed):
 
     return pd.DataFrame(results)
 
+
 def calculate_metrics(results):
-    summary = []
+    """Summarize results across seeds with 95% confidence intervals."""
+    if results.empty:
+        raise ValueError("No evaluation results were produced.")
 
-    for method, group in results.groupby("method"):
-        latencies = group["latency_ms"]
+    required = {
+        "method", "seed", "latency_ms",
+        "sla_violation", "reward", "stage", "window_id"
+    }
+    missing = required - set(results.columns)
+    if missing:
+        raise ValueError(f"Missing result columns: {sorted(missing)}")
 
-        summary.append({
+    # First calculate metrics separately for each method and seed.
+    per_seed = (
+        results.groupby(["method", "seed"], dropna=False)
+        .agg(
+            average_latency_ms=("latency_ms", "mean"),
+            p95_latency_ms=("latency_ms", lambda x: x.quantile(0.95)),
+            p99_latency_ms=("latency_ms", lambda x: x.quantile(0.99)),
+            sla_violation_rate=("sla_violation", "mean"),
+            average_reward=("reward", "mean"),
+            windows_evaluated=("window_id", "nunique"),
+        )
+        .reset_index()
+    )
+
+    # Two-sided 95% Student-t critical values for small seed counts.
+    t_critical = {
+        2: 12.706, 3: 4.303, 4: 3.182, 5: 2.776,
+        6: 2.571, 7: 2.447, 8: 2.365, 9: 2.306,
+        10: 2.262,
+    }
+
+    metric_columns = [
+        "average_latency_ms",
+        "p95_latency_ms",
+        "p99_latency_ms",
+        "sla_violation_rate",
+        "average_reward",
+    ]
+
+    summary_rows = []
+
+    for method, group in per_seed.groupby("method", dropna=False):
+        row = {
             "method": method,
-            "average_latency_ms": latencies.mean(),
-            "p95_latency_ms": latencies.quantile(0.95),
-            "p99_latency_ms": latencies.quantile(0.99),
-            "sla_violation_rate": group["sla_violation"].mean(),
-            "average_reward": group["reward"].mean(),
-            "windows_evaluated": len(group),
             "seeds_evaluated": group["seed"].nunique(),
-        })
+            "windows_evaluated": group["windows_evaluated"].mean(),
+        }
 
-    return pd.DataFrame(summary).sort_values("method")
+        for metric in metric_columns:
+            values = group[metric].dropna().to_numpy(dtype=float)
+            n = len(values)
 
+            mean_value = float(np.mean(values)) if n else float("nan")
+            row[metric] = mean_value
+
+            if n >= 2:
+                critical = t_critical.get(n, 1.96)
+                margin = critical * float(np.std(values, ddof=1)) / np.sqrt(n)
+            else:
+                margin = float("nan")
+
+            row[f"{metric}_ci95_low"] = mean_value - margin
+            row[f"{metric}_ci95_high"] = mean_value + margin
+
+        summary_rows.append(row)
+
+    summary = pd.DataFrame(summary_rows).sort_values("method").reset_index(drop=True)
+
+    print("\n===== RESULTS: MEAN ACROSS SEEDS WITH 95% CI =====")
+    print(summary.to_string(index=False))
+
+    return summary
 
 # --------------------------------------------------
 # MAIN
