@@ -1,0 +1,21 @@
+{
+  "run_id": "20261019T180436Z",
+  "created_at_utc": "2026-10-19T18:04:36.354683+00:00",
+  "decision_log_file": "baseline_decision_logs_20261019T180436Z.csv",
+  "transition_file": "offline_rl_transitions_20261019T180436Z.csv",
+  "state_features": [
+    "n_calls",
+    "mean_ms",
+    "p50",
+    "p95",
+    "p99"
+  ],
+  "reward_definition": "1 / (1 + max(latency_ms, 0) / stage_SLA_MS[stage]); higher is better.",
+  "construction": "state is the previous chronological window's stage-level mean context; next state is the current window's mean context.",
+  "limitations": [
+    "Offline proxy from processed latency windows; not live on-policy experience.",
+    "Aggregated candidate rows may include counterfactual information unavailable to a live router.",
+    "Oracle is excluded from the trainable transition export.",
+    "Only five test windows per stage are available in the current 30-window dataset."
+  ]
+}

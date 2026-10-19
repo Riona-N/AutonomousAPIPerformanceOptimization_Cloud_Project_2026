@@ -1,5 +1,7 @@
 import random
 import numpy as np
+import math
+import random
 
 
 class EpsilonGreedyBandit:
@@ -35,6 +37,7 @@ class EpsilonGreedyBandit:
         return self.counts.copy()
 
 
+
 class UCB1:
     def __init__(self, n_candidates=3):
         self.n = n_candidates
@@ -43,23 +46,23 @@ class UCB1:
         self.total = 0
 
     def choose(self):
-        # Try every candidate at least once
-        for i in range(self.n):
-            if self.counts[i] == 0:
-                return i
+        # Explore each candidate once before calculating UCB scores.
+        for arm in range(self.n):
+            if self.counts[arm] == 0:
+                return arm
 
-        # Calculate the Upper Confidence Bound score
-        scores = []
+        total_counts = sum(self.counts)
+        ucb_scores = []
 
-        for i in range(self.n):
-            average_reward = self.values[i]
+        for arm in range(self.n):
+            average_reward = self.values[arm]
             exploration_bonus = (
-                2 * np.log(self.total) / self.counts[i]
+                2 * math.log(total_counts) / self.counts[arm]
             ) ** 0.5
 
-            scores.append(average_reward + exploration_bonus)
+            ucb_scores.append(average_reward + exploration_bonus)
 
-        return int(np.argmax(scores))
+        return max(range(self.n), key=lambda arm: ucb_scores[arm])
 
     def update(self, candidate, reward):
         self.total += 1
