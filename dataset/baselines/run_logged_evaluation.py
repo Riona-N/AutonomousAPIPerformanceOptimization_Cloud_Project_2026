@@ -31,8 +31,15 @@ def latest_detailed():
 
 
 def run_id_from(path):
-    match = re.search(r"baseline_test_detailed_results_(.+)\\.csv$", path.name)
-    return match.group(1) if match else datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    import os
+    import re
+
+    name = os.path.basename(path)
+    match = re.search(r"baseline_test_detailed_results_(.+)\.csv$", name)
+    if match:
+        return match.group(1)
+    return "unknown_run"
+
 
 
 def export(detailed_path):
@@ -120,7 +127,7 @@ def export(detailed_path):
         ]
     }
     schema_path = RESULTS / f"offline_rl_transition_schema_{run_id}.json"
-    schema_path.write_text(json.dumps(schema, indent=2) + "\\n", encoding="utf-8")
+    schema_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
     return log_path, transition_path, schema_path
 
 

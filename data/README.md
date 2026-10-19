@@ -82,6 +82,8 @@ online adaptation on the chronological test sequence, not a fully
 frozen policy. The oracle uses observed test-window outcomes to choose
 the best candidate and is an optimistic reference, not a deployable policy.
 
+**PaySim–Alibaba split alignment caveat:** The PaySim transaction `split` column is inherited from the original PaySim preprocessing. The linkage builder maps PaySim minute slots to Alibaba `window_id` values independently of that split. Consequently, transactions labelled train, validation, and test can share an Alibaba window. For routing evaluation, use the chronological split of Alibaba `window_id` values as the authoritative evaluation boundary. Do not interpret the inherited PaySim split as evidence of window-level isolation. The current static-policy linkage outcomes are candidate-0 simulation outcomes and must not be treated as observed outcomes for other routing candidates.
+
 ## Benchmark-pool limitation
 
 `src/simulation/preprocess_alibaba.py` selects candidate services using

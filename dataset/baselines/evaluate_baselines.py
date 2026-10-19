@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from scipy.stats import t
 import numpy as np
 import pandas as pd
 
@@ -494,12 +495,7 @@ def calculate_metrics(results):
         .reset_index()
     )
 
-    # Two-sided 95% Student-t critical values for small seed counts.
-    t_critical = {
-        2: 12.706, 3: 4.303, 4: 3.182, 5: 2.776,
-        6: 2.571, 7: 2.447, 8: 2.365, 9: 2.306,
-        10: 2.262,
-    }
+   
 
     metric_columns = [
         "average_latency_ms",
@@ -526,7 +522,7 @@ def calculate_metrics(results):
             row[metric] = mean_value
 
             if n >= 2:
-                critical = t_critical.get(n, 1.96)
+                critical = float(t.ppf(0.975, df=n - 1))
                 margin = critical * float(np.std(values, ddof=1)) / np.sqrt(n)
             else:
                 margin = float("nan")
