@@ -101,6 +101,28 @@ A focused test should cover the regression:
 
 This would validate the intended behavior and provide evidence that the training loop remains consistent.
 
+## Fix applied and validation status
+
+The F3 fix has been implemented and verified in the codebase.
+
+- The environment now guards against post-termination stepping in `src/ml_model/data_api_env.py`.
+- The guard raises:
+
+```python
+RuntimeError("Cannot call step() after termination. Call reset() first.")
+```
+
+- A regression test was added in `tests/test_data_api_env.py` to ensure the environment rejects a second `step()` call after `terminated=True`.
+
+Validation command:
+
+```powershell
+Set-Location "c:\Users\mousu\AutonomousAPIPerformanceOptimization_Cloud_Project_2026"
+.\RL_env\Scripts\python.exe -m pytest tests\test_data_api_env.py -q
+```
+
+Result: 6 tests passed.
+
 ## Summary
 
 F3 is the environment contract fix for post-termination stepping. The issue is that the environment returns `terminated=True` but does not reject additional calls to `step()`. The correct fix is to raise an error and require `reset()`, which aligns the environment with Gymnasium conventions and protects the RL pipeline from invalid continuation after episode end.

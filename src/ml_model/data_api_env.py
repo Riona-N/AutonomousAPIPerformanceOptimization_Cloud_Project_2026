@@ -12,10 +12,10 @@ import pandas as pd
 from gymnasium import spaces
 
 try:
-    from src.config import OUT, STAGES
+    from src.config import OUT, STAGES, CANDIDATES_PER_STAGE
     from src.linkage_lib import LatencyModel, QCOLS
 except ImportError:
-    from config import OUT, STAGES
+    from config import OUT, STAGES, CANDIDATES_PER_STAGE
     from linkage_lib import LatencyModel, QCOLS
 
 
@@ -33,7 +33,7 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
     metadata = {"render_modes": []}
     stages = tuple(STAGES)
     transaction_types = ("CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER")
-    candidates_per_stage = 3
+    candidates_per_stage = CANDIDATES_PER_STAGE
     metrics_per_candidate = 5
 
     def __init__(
@@ -48,6 +48,7 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
         self.split = split
         self.episode_length = episode_length
         self._seed = seed
+        self.candidates_per_stage = int(CANDIDATES_PER_STAGE)
 
         tx_path = self.data_dir / "linkage_tx.parquet"
         if not tx_path.exists():

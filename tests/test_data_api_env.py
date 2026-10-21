@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.config import STAGES
+from src.config import CANDIDATES_PER_STAGE, STAGES
 from src.ml_model.data_api_env import DataApiRoutingEnv
 from src.linkage_lib import QCOLS
 
@@ -92,6 +92,18 @@ def test_reset_rejects_window_not_in_latency_model(routing_data):
 
     with pytest.raises(ValueError, match="Slot 0 maps to an invalid window"):
         env.reset(options={"start": 0})
+
+
+def test_observation_shape_uses_configured_candidate_count(routing_data):
+    env = make_env(routing_data)
+
+    expected = (
+        len(STAGES) * CANDIDATES_PER_STAGE * 5
+        + len(env.transaction_types)
+        + 3
+    )
+    assert env.candidates_per_stage == CANDIDATES_PER_STAGE
+    assert env.observation_space.shape == (expected,)
 
 
 def test_step_rejects_after_termination(routing_data):
