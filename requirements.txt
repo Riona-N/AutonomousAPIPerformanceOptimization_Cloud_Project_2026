@@ -1,0 +1,18 @@
+# Core dependencies
+numpy>=1.24.0
+pandas>=2.0.0
+pyarrow>=14.0.0
+scikit-learn>=1.3.0
+
+# Reinforcement Learning & Simulation
+gymnasium>=0.29.0
+stable-baselines3>=2.0.0
+torch>=2.0.0
+
+# AWS SDK & Cloud Infrastructure (Role 2)
+boto3>=1.35.0
+botocore>=1.35.0
+
+# Testing & Mocking (Role 2)
+pytest>=7.0.0
+moto[all]>=4.2.0

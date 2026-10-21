@@ -1,0 +1,25 @@
+{
+  "num_transactions": 50,
+  "autonomous_policy": {
+    "mean_e2e_ms": 146.5588,
+    "p50_e2e_ms": 151.20499999999998,
+    "p95_e2e_ms": 183.3275,
+    "p99_e2e_ms": 194.5982,
+    "sla_violation_rate": 0.0,
+    "success_rate": 1.0,
+    "mean_reward": 0.80797
+  },
+  "static_baseline": {
+    "mean_e2e_ms": 140.6416,
+    "p50_e2e_ms": 138.87,
+    "p95_e2e_ms": 184.36299999999997,
+    "p99_e2e_ms": 199.84369999999998,
+    "sla_violation_rate": 0.0,
+    "success_rate": 1.0,
+    "mean_reward": 0.82378
+  },
+  "improvements": {
+    "p95_latency_reduction_pct": 0.56,
+    "sla_violation_reduction_pct_pts": 0.0
+  }
+}

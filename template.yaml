@@ -1,0 +1,219 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Autonomous API Performance Optimization Framework for Digital Payment Gateways
+  Role 2: Cloud Infrastructure, Microservices, and Closed-Loop Controller
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.11
+    Tracing: Active
+    Environment:
+      Variables:
+        DYNAMODB_TRANSACTION_TABLE: !Ref TransactionLogsTable
+        DYNAMODB_METRICS_TABLE: !Ref SystemMetricsCacheTable
+        CLOUDWATCH_NAMESPACE: AutonomousPaymentAPI
+        SLA_MS: "374.19"
+        TIMEOUT_MS: "748.38"
+        SAGEMAKER_ENDPOINT_NAME: !Ref SageMakerEndpointName
+
+Parameters:
+  SageMakerEndpointName:
+    Type: String
+    Default: "role1-ppo"
+    Description: "Name of the deployed SageMaker PPO model endpoint"
+
+Resources:
+  # ==========================================
+  # 1. DynamoDB Tables
+  # ==========================================
+  TransactionLogsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: TransactionLogs
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: transaction_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: transaction_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+
+  SystemMetricsCacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: SystemMetricsCache
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: stage_candidate
+          AttributeType: S
+      KeySchema:
+        - AttributeName: stage_candidate
+          KeyType: HASH
+
+  # ==========================================
+  # 2. Lambda Microservice Functions
+  # ==========================================
+  StateBuilderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src.aws.lambda_state_builder.lambda_handler
+      Description: "Constructs 83-dim observation state and queries RL agent"
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SystemMetricsCacheTable
+        - CloudWatchPutMetricPolicy: {}
+        - Statement:
+            - Effect: Allow
+              Action:
+                - "sagemaker:InvokeEndpoint"
+              Resource: "*"
+
+  MicroservicePipelineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src.aws.lambda_microservices.microservice_pipeline_handler
+      Description: "Executes payment transaction through 5 microservice stages"
+
+  ActionExecutorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src.aws.lambda_action_executor.lambda_handler
+      Description: "Coordinates execution, measures latency, evaluates SLA and logs audit trail"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TransactionLogsTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref MicroservicePipelineFunction
+
+  MetricsPublisherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src.aws.lambda_metrics_publisher.lambda_handler
+      Description: "Publishes operational CloudWatch metrics and updates live DynamoDB cache"
+      Policies:
+        - CloudWatchPutMetricPolicy: {}
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SystemMetricsCacheTable
+
+  # ==========================================
+  # 3. AWS Step Functions State Machine
+  # ==========================================
+  ClosedLoopStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: src/aws/step_function.json
+      DefinitionSubstitutions:
+        StateBuilderFunctionArn: !GetAtt StateBuilderFunction.Arn
+        ActionExecutorFunctionArn: !GetAtt ActionExecutorFunction.Arn
+        MetricsPublisherFunctionArn: !GetAtt MetricsPublisherFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref StateBuilderFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ActionExecutorFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref MetricsPublisherFunction
+
+  # ==========================================
+  # 4. Amazon API Gateway Entry Point
+  # ==========================================
+  PaymentApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+        AllowOrigin: "'*'"
+
+  ApiTransactionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src.aws.lambda_state_builder.lambda_handler
+      Events:
+        PostTransaction:
+          Type: Api
+          Properties:
+            RestApiId: !Ref PaymentApi
+            Path: /transaction
+            Method: post
+
+  # ==========================================
+  # 5. CloudWatch Operational Dashboard
+  # ==========================================
+  PaymentGatewayDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: AutonomousPaymentGateway-Dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "view": "timeSeries",
+                "stacked": false,
+                "metrics": [
+                  [ "AutonomousPaymentAPI", "EndToEndLatency", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "label": "E2E Latency (ms)", "color": "#1f77b4" } ]
+                ],
+                "annotations": {
+                  "horizontal": [
+                    { "label": "SLA Threshold (374.19 ms)", "value": 374.19, "fill": "below", "color": "#ff7f0e" },
+                    { "label": "Timeout Threshold (748.38 ms)", "value": 748.38, "fill": "above", "color": "#d62728" }
+                  ]
+                },
+                "region": "${AWS::Region}",
+                "title": "End-to-End Latency vs SLA Limits",
+                "period": 60
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "view": "timeSeries",
+                "stacked": false,
+                "metrics": [
+                  [ "AutonomousPaymentAPI", "SLAViolation", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "stat": "Average", "label": "SLA Violation Rate", "color": "#d62728" } ],
+                  [ "AutonomousPaymentAPI", "TransactionSuccess", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "stat": "Average", "label": "Success Rate", "color": "#2ca02c" } ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "SLA Violation vs Success Rate",
+                "period": 60
+              }
+            }
+          ]
+        }
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway POST endpoint for live payment transactions"
+    Value: !Sub "https://${PaymentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/transaction"
+  StateMachineArn:
+    Description: "Closed Loop Controller Step Functions State Machine ARN"
+    Value: !Ref ClosedLoopStateMachine
+  TransactionLogsTableName:
+    Description: "DynamoDB Transaction Logs Table"
+    Value: !Ref TransactionLogsTable
+  SystemMetricsCacheTableName:
+    Description: "DynamoDB System Metrics Cache Table"
+    Value: !Ref SystemMetricsCacheTable

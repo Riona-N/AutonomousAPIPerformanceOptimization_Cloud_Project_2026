@@ -1,0 +1,86 @@
+{
+  "Comment": "Autonomous API Performance Optimization Closed-Loop Controller State Machine",
+  "StartAt": "StateBuilder",
+  "States": {
+    "StateBuilder": {
+      "Type": "Task",
+      "Resource": "${StateBuilderFunctionArn}",
+      "Comment": "Collects CloudWatch/DynamoDB telemetry, builds 83-dim observation, and obtains RL routing decision",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "ExecutionFailed"
+        }
+      ],
+      "Next": "ActionExecutor"
+    },
+    "ActionExecutor": {
+      "Type": "Task",
+      "Resource": "${ActionExecutorFunctionArn}",
+      "Comment": "Executes 5 microservice stages, samples realized latencies, evaluates SLA compliance and reward, logs to DynamoDB",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "ExecutionFailed"
+        }
+      ],
+      "Next": "MetricsPublisher"
+    },
+    "MetricsPublisher": {
+      "Type": "Task",
+      "Resource": "${MetricsPublisherFunctionArn}",
+      "Comment": "Publishes metrics to CloudWatch and refreshes DynamoDB SystemMetricsCache for next closed-loop cycle",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "ExecutionFailed"
+        }
+      ],
+      "Next": "TransactionCompleted"
+    },
+    "TransactionCompleted": {
+      "Type": "Succeed"
+    },
+    "ExecutionFailed": {
+      "Type": "Fail",
+      "Cause": "Pipeline step failed during closed-loop execution",
+      "Error": "ExecutionError"
+    }
+  }
+}
