@@ -126,6 +126,10 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
     def step(
         self, action: np.ndarray | list[int] | tuple[int, ...]
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+        episode_len = min(self.episode_length, len(self.transactions) - self._episode_start)
+        if self._position >= episode_len:
+            raise RuntimeError("Cannot call step() after termination. Call reset() first.")
+
         action_array = np.asarray(action, dtype=np.int64)
         if not self.action_space.contains(action_array):
             raise ValueError("Action must contain one candidate index (0..2) per stage")

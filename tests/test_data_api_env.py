@@ -92,3 +92,14 @@ def test_reset_rejects_window_not_in_latency_model(routing_data):
 
     with pytest.raises(ValueError, match="Slot 0 maps to an invalid window"):
         env.reset(options={"start": 0})
+
+
+def test_step_rejects_after_termination(routing_data):
+    env = make_env(routing_data, episode_length=1)
+    env.reset(options={"start": 0})
+
+    _, _, terminated, _, _ = env.step(np.zeros(len(STAGES), dtype=np.int64))
+    assert terminated is True
+
+    with pytest.raises(RuntimeError, match=r"Cannot call step\(\) after termination"):
+        env.step(np.zeros(len(STAGES), dtype=np.int64))
