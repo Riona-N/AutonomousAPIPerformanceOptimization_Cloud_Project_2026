@@ -141,3 +141,18 @@ python -m src.ml_model.train_toy_agent --timesteps 5000
 ```
 
 The runner saves the trained model (ignored by Git) to `results/toy_ppo_agent.zip` and evaluation metrics to `results/toy_ppo_metrics.json`. This is a tooling prototype, not a production policy or a replacement for the later PaySim and infrastructure-trace environment.
+
+## F1 Slot-to-Window Validation
+
+The data-backed routing environment validates that each transaction slot has a
+mapping to a window present in the latency model. Focused tests cover valid
+first and last slots, a missing slot mapping during both `reset()` and
+`step()`, and a mapping to a window that is absent from the latency model.
+
+Run the tests from the repository root:
+
+```powershell
+pytest tests\test_data_api_env.py -q
+```
+
+**Pass status:** 4 tests passed on 2026-10-21.
