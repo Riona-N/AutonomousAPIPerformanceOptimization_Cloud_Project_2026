@@ -1,0 +1,14 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "api-perf-optimization-stack"
+resolve_s3 = true
+s3_prefix = "api-perf-optimization-stack"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "SageMakerEndpointName=\"role1-ppo\""
+image_repositories = []
+
+[default.global.parameters]
+region = "us-east-1"

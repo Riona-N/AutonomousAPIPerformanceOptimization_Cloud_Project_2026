@@ -158,7 +158,7 @@ def invoke_routing_agent(
             client = boto3.client("sagemaker-runtime", region_name=region)
             payload = {
                 "instances": [{
-                    "observation": observation.tolist(),
+                    "observation": observation if isinstance(observation, list) else observation.tolist(),
                     "context": context,
                 }]
             }
@@ -259,7 +259,7 @@ def lambda_handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]
         "statusCode": 200,
         "transaction_id": tx_id,
         "transaction": tx_event,
-        "observation": observation.tolist(),
+        "observation": observation if isinstance(observation, list) else observation.tolist(),
         "action": action,
         "explanation": explanation,
         "sla_ms": sla_ms,
