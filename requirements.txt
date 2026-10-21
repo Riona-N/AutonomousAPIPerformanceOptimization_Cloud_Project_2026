@@ -13,6 +13,6 @@ torch>=2.0.0
 boto3>=1.35.0
 botocore>=1.35.0
 
-# Testing & Mocking (Role 2)
+# Testing (Role 2)
 pytest>=7.0.0
-moto[all]>=4.2.0
+moto>=4.2.0

@@ -17,10 +17,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 from pathlib import Path
 from typing import Any
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 try:
     from src.linkage_lib import LatencyModel
@@ -65,14 +69,14 @@ def simulate_stage_latency(
     stage: str,
     candidate: int,
     window_id: int = 0,
-    rng: np.random.Generator | None = None,
+    rng: Any = None,
 ) -> float:
     """Sample realistic latency (ms) for a specific stage and candidate."""
-    if rng is None:
-        rng = np.random.default_rng()
+    if rng is None and np is not None:
+        rng = np.random.default_rng() if np is not None else None
 
     lm = get_latency_model()
-    if lm is not None and stage in STAGES:
+    if lm is not None and stage in STAGES and rng is not None:
         stage_idx = STAGES.index(stage)
         try:
             val = float(lm.sample(
@@ -96,7 +100,10 @@ def simulate_stage_latency(
     mean, std = base_latencies.get(stage, (30.0, 10.0))
     # Candidate variation: slight shift per candidate replica
     cand_shift = (candidate - 1) * 3.5
-    raw = rng.normal(mean + cand_shift, std)
+    if rng is not None:
+        raw = rng.normal(mean + cand_shift, std)
+    else:
+        raw = random.gauss(mean + cand_shift, std)
     return max(1.0, float(raw))
 
 
@@ -150,7 +157,7 @@ def microservice_pipeline_handler(event: dict[str, Any], context: Any = None) ->
     stage_latencies_ms = {}
     total_ms = 0.0
 
-    rng = np.random.default_rng()
+    rng = np.random.default_rng() if np is not None else None
 
     for stage in STAGES:
         cand = int(action.get(stage, 0))

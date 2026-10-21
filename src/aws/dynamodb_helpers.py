@@ -19,7 +19,11 @@ METRICS_CACHE_TABLE = os.getenv("DYNAMODB_METRICS_TABLE", "SystemMetricsCache")
 
 
 def _get_resource(region_name: str | None = None) -> Any:
-    return boto3.resource("dynamodb", region_name=region_name or os.getenv("AWS_REGION", "us-east-1"))
+    try:
+        return boto3.resource("dynamodb", region_name=region_name or os.getenv("AWS_REGION", "us-east-1"))
+    except Exception as exc:
+        logger.debug(f"Could not initialize DynamoDB resource: {exc}")
+        return None
 
 
 def float_to_decimal(obj: Any) -> Any:
@@ -109,9 +113,10 @@ def log_transaction(
     try:
         if dynamodb is None:
             dynamodb = _get_resource()
-        table = dynamodb.Table(table_name)
-        dynamo_item = float_to_decimal(record)
-        table.put_item(Item=dynamo_item)
+        if dynamodb is not None:
+            table = dynamodb.Table(table_name)
+            dynamo_item = float_to_decimal(record)
+            table.put_item(Item=dynamo_item)
     except (ClientError, BotoCoreError, Exception) as exc:
         logger.warning(f"Could not log transaction to DynamoDB: {exc}")
     return record
@@ -126,6 +131,8 @@ def query_transaction(
     try:
         if dynamodb is None:
             dynamodb = _get_resource()
+        if dynamodb is None:
+            return []
         table = dynamodb.Table(table_name)
         from boto3.dynamodb.conditions import Key
 
@@ -150,6 +157,8 @@ def update_metrics_cache(
     try:
         if dynamodb is None:
             dynamodb = _get_resource()
+        if dynamodb is None:
+            return 0
         table = dynamodb.Table(table_name)
         with table.batch_writer() as batch:
             for m in metrics_list:
@@ -180,6 +189,8 @@ def get_metrics_cache(
     try:
         if dynamodb is None:
             dynamodb = _get_resource()
+        if dynamodb is None:
+            return {}
         table = dynamodb.Table(table_name)
         response = table.scan()
         items = response.get("Items", [])

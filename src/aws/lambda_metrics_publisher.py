@@ -34,9 +34,13 @@ def publish_cloudwatch_metrics(
     cloudwatch_client: Any = None,
 ) -> bool:
     """Publish custom metrics to AWS CloudWatch."""
-    if cloudwatch_client is None:
-        region = os.getenv("AWS_REGION", "us-east-1")
-        cloudwatch_client = boto3.client("cloudwatch", region_name=region)
+    try:
+        if cloudwatch_client is None:
+            region = os.getenv("AWS_REGION", "us-east-1")
+            cloudwatch_client = boto3.client("cloudwatch", region_name=region)
+    except Exception as exc:
+        logger.warning(f"Could not initialize CloudWatch client: {exc}")
+        return False
 
     e2e_ms = float(payload.get("e2e_ms", 0.0))
     sla_violation = 1.0 if payload.get("sla_violation") else 0.0

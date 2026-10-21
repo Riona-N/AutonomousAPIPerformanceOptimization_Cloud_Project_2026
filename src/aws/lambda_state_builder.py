@@ -16,12 +16,17 @@ import json
 import logging
 import math
 import os
+import random
 from pathlib import Path
 from typing import Any
 
 import boto3
-import numpy as np
 from botocore.exceptions import ClientError
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 try:
     from src.aws.dynamodb_helpers import get_metrics_cache
@@ -39,6 +44,10 @@ TX_TYPES = ("CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER")
 DEFAULT_SLA_MS = 374.19
 DEFAULT_TIMEOUT_MS = 748.38
 DEFAULT_AMOUNT_SCALE = 1_000_000.0
+
+
+def _clip(val: float, low: float = 0.0, high: float = 1.0) -> float:
+    return max(low, min(high, float(val)))
 
 
 def _load_baseline_metrics_from_disk() -> dict[str, dict[str, float]]:
@@ -107,10 +116,10 @@ def build_observation_vector(
             sla_viol = float(m.get("sla_violation", 0))
 
             metric_values.extend([
-                float(np.clip(p50 / timeout_ms, 0.0, 1.0)),
-                float(np.clip(p95 / timeout_ms, 0.0, 1.0)),
-                float(np.clip(p99 / timeout_ms, 0.0, 1.0)),
-                float(np.clip(math.log1p(n_calls) / 10.0, 0.0, 1.0)),
+                _clip(p50 / timeout_ms, 0.0, 1.0),
+                _clip(p95 / timeout_ms, 0.0, 1.0),
+                _clip(p99 / timeout_ms, 0.0, 1.0),
+                _clip(math.log1p(n_calls) / 10.0, 0.0, 1.0),
                 float(1.0 if sla_viol > 0 else 0.0),
             ])
 
@@ -120,14 +129,18 @@ def build_observation_vector(
 
     # 3. 3 transaction features
     amount = float(tx_event.get("amount", 100.0))
-    norm_amount = float(np.clip(math.log1p(amount) / math.log1p(amount_scale), 0.0, 1.0))
-    fraud_risk = float(np.clip(float(tx_event.get("fraud_risk", 0.01)), 0.0, 1.0))
+    norm_amount = _clip(math.log1p(amount) / math.log1p(amount_scale), 0.0, 1.0)
+    fraud_risk = _clip(float(tx_event.get("fraud_risk", 0.01)), 0.0, 1.0)
     is_transfer = 1.0 if tx_type.startswith("TRANSFER") else 0.0
 
     tx_values = [norm_amount, fraud_risk, is_transfer]
 
-    obs = np.asarray(metric_values + type_values + tx_values, dtype=np.float32)
-    assert obs.size == 83, f"Expected 83 features, got {obs.size}"
+    full_values = metric_values + type_values + tx_values
+    if np is not None:
+        obs = np.asarray(full_values, dtype=np.float32)
+    else:
+        obs = full_values
+    assert len(obs) == 83, f"Expected 83 features, got {len(obs)}"
     return obs
 
 
@@ -209,7 +222,7 @@ def lambda_handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]
     else:
         body = event.get("body", event)
 
-    tx_id = str(body.get("transaction_id", f"txn_{int(np.random.randint(1e6, 9e6))}"))
+    tx_id = str(body.get("transaction_id", f"txn_{random.randint(1_000_000, 9_000_000)}"))
     tx_event = {
         "transaction_id": tx_id,
         "type": body.get("type", "PAYMENT"),

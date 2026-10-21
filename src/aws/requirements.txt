@@ -1,0 +1,1 @@
+# AWS Lambda runtime includes boto3 and botocore by default.

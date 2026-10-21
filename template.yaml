@@ -63,8 +63,8 @@ Resources:
   StateBuilderFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: .
-      Handler: src.aws.lambda_state_builder.lambda_handler
+      CodeUri: src/aws
+      Handler: lambda_state_builder.lambda_handler
       Description: "Constructs 83-dim observation state and queries RL agent"
       Policies:
         - DynamoDBReadPolicy:
@@ -79,15 +79,15 @@ Resources:
   MicroservicePipelineFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: .
-      Handler: src.aws.lambda_microservices.microservice_pipeline_handler
+      CodeUri: src/aws
+      Handler: lambda_microservices.microservice_pipeline_handler
       Description: "Executes payment transaction through 5 microservice stages"
 
   ActionExecutorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: .
-      Handler: src.aws.lambda_action_executor.lambda_handler
+      CodeUri: src/aws
+      Handler: lambda_action_executor.lambda_handler
       Description: "Coordinates execution, measures latency, evaluates SLA and logs audit trail"
       Policies:
         - DynamoDBCrudPolicy:
@@ -98,8 +98,8 @@ Resources:
   MetricsPublisherFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: .
-      Handler: src.aws.lambda_metrics_publisher.lambda_handler
+      CodeUri: src/aws
+      Handler: lambda_metrics_publisher.lambda_handler
       Description: "Publishes operational CloudWatch metrics and updates live DynamoDB cache"
       Policies:
         - CloudWatchPutMetricPolicy: {}
@@ -140,8 +140,8 @@ Resources:
   ApiTransactionFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: .
-      Handler: src.aws.lambda_state_builder.lambda_handler
+      CodeUri: src/aws
+      Handler: lambda_state_builder.lambda_handler
       Events:
         PostTransaction:
           Type: Api
