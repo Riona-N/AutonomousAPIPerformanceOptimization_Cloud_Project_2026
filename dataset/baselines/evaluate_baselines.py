@@ -1,164 +1,174 @@
 from pathlib import Path
 
+from scipy.stats import t
+import numpy as np
 import pandas as pd
 
-from rule_based import build_rule_policy, choose_candidate
-from bandit import EpsilonGreedyBandit
+from dataset.baselines.time_split import chronological_split
+from dataset.baselines.rule_based import build_rule_policy, choose_candidate
+from dataset.baselines.bandit import EpsilonGreedyBandit, UCB1, ThompsonSampling
+from dataset.baselines.additional_policies import (
+    RandomRouting,
+    LeastLoaded,
+    PowerOfTwoChoices,
+    LinUCB,
+)
 
-
-# ---------------------------------------------------------
-# Paths
-# ---------------------------------------------------------
+# --------------------------------------------------
+# FILE PATHS
+# --------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 PROCESSED_DIR = BASE_DIR / "processed"
-
 RESULTS_DIR = BASE_DIR.parent / "results"
 
 WINDOWS_FILE = PROCESSED_DIR / "stage_latency_windows.parquet"
 CANDIDATES_FILE = PROCESSED_DIR / "stage_candidates.parquet"
 
+# Known stage SLAs, in milliseconds
+STAGE_SLA_MS = {
+    "auth": 625.0,
+    "db": 2.0,
+    "ingress": 152.0,
+    "processor": 37.0,
+    "routing": 689.45,
+}
 
-# ---------------------------------------------------------
-# Load data
-# ---------------------------------------------------------
+SEEDS = [11, 22, 33, 44, 55]
+EPSILONS = [0.05, 0.1, 0.2]
+
+
+# --------------------------------------------------
+# LOAD AND PREPARE DATA
+# --------------------------------------------------
 
 def load_data():
-
-    print("Loading Alibaba processed data...")
+    print("Loading processed Alibaba data...")
 
     windows = pd.read_parquet(WINDOWS_FILE)
     candidates = pd.read_parquet(CANDIDATES_FILE)
 
-    print(f"Latency windows loaded: {len(windows)} rows")
-    print(f"Candidates loaded: {len(candidates)} rows")
+    required_window_columns = {
+        "stage", "window_id", "cand_rank",
+        "p95", "sla_violation"
+    }
+
+    missing = required_window_columns - set(windows.columns)
+
+    if missing:
+        raise ValueError(
+            f"Missing columns in stage_latency_windows.parquet: {missing}"
+        )
+
+    print(f"Latency-window rows: {len(windows)}")
+    print(f"Candidate-summary rows: {len(candidates)}")
 
     return windows, candidates
 
 
-# ---------------------------------------------------------
-# Prepare evaluation windows
-# ---------------------------------------------------------
-
 def prepare_windows(windows):
+    windows = windows.copy()
+
+    windows["window_id"] = pd.to_numeric(
+        windows["window_id"], errors="raise"
+    )
+
+    windows["cand_rank"] = pd.to_numeric(
+        windows["cand_rank"], errors="raise"
+    )
+
+    windows["p95"] = pd.to_numeric(
+        windows["p95"], errors="coerce"
+    )
+
+    windows = windows.dropna(
+        subset=["stage", "window_id", "cand_rank", "p95"]
+    )
 
     windows = windows.sort_values(
-        ["stage", "window_id"]
+        ["stage", "window_id", "cand_rank"]
     ).reset_index(drop=True)
 
     return windows
 
 
-# ---------------------------------------------------------
-# Static rule-based baseline
-# ---------------------------------------------------------
+# --------------------------------------------------
+# REWARD FOR LEARNING
+# --------------------------------------------------
 
-def evaluate_rule_based(windows, candidates):
+def learning_reward(stage, latency_ms):
+    """
+    Convert latency into a reward between 0 and 1.
 
-    print("\nRunning rule-based baseline...")
+    Lower latency produces a higher reward.
+    The stage SLA provides the normalization scale.
+    """
 
-    policy = build_rule_policy(candidates)
+    scale = STAGE_SLA_MS.get(stage)
 
-    print("\nStatic routing policy:")
+    if scale is None or scale <= 0:
+        raise ValueError(f"Missing or invalid SLA for stage: {stage}")
 
-    for stage in sorted(policy):
+    return 1.0 / (1.0 + max(latency_ms, 0.0) / scale)
 
-        print(
-            f"  {stage} -> candidate {policy[stage]}"
+
+# --------------------------------------------------
+# RECORD THE SELECTED CANDIDATE
+# --------------------------------------------------
+
+def make_result(method, stage, window_id, candidate, selected, seed=None):
+    latency = float(selected["p95"])
+    sla_violation = int(selected["sla_violation"])
+
+    return {
+        "method": method,
+        "seed": seed,
+        "stage": stage,
+        "window_id": window_id,
+        "candidate": int(candidate),
+        "latency_ms": latency,
+        "sla_violation": sla_violation,
+        "reward": -latency,
+    }
+
+
+# --------------------------------------------------
+# RULE-BASED BASELINE
+# --------------------------------------------------
+
+def evaluate_rule_based(train_windows, test_windows, seed=None):
+    print("Running rule-based baseline...")
+
+    # Learn the best candidate using training windows only.
+    training_summary = (
+        train_windows.groupby(["stage", "cand_rank"])["p95"]
+        .mean()
+        .reset_index()
+    )
+
+    best_candidates = (
+        training_summary.sort_values(
+            ["stage", "p95", "cand_rank"]
         )
+        .drop_duplicates(subset=["stage"])
+        .set_index("stage")["cand_rank"]
+        .to_dict()
+    )
 
     results = []
 
-    unique_windows = (
-        windows[
-            ["stage", "window_id"]
-        ]
-        .drop_duplicates()
-        .sort_values(["stage", "window_id"])
-    )
-
-    for _, row in unique_windows.iterrows():
-
-        stage = row["stage"]
-        window_id = row["window_id"]
-
-        candidate = choose_candidate(
-            policy,
-            stage
-        )
-
-        selected = windows[
-            (windows["stage"] == stage)
-            & (windows["window_id"] == window_id)
-            & (windows["cand_rank"] == candidate)
+    # Evaluate the fixed policy on test windows only.
+    for stage in sorted(test_windows["stage"].unique()):
+        stage_data = test_windows[
+            test_windows["stage"] == stage
         ]
 
-        if selected.empty:
-            continue
+        candidate = int(best_candidates[stage])
 
-        selected = selected.iloc[0]
-
-        latency = float(selected["p95"])
-        results.append({
-            "method": "rule_based",
-            "stage": stage,
-            "window_id": window_id,
-            "candidate": candidate,
-            "latency_ms": latency,
-            "sla_violation": int(selected["sla_violation"]),
-    "reward": -latency
-})
-
-    return pd.DataFrame(results)
-
-
-# ---------------------------------------------------------
-# Bandit baseline
-# ---------------------------------------------------------
-
-def evaluate_bandit(windows):
-
-    print("\nRunning epsilon-greedy bandit...")
-
-    results = []
-
-    stages = sorted(
-        windows["stage"].unique()
-    )
-
-    for stage in stages:
-
-        stage_data = windows[
-            windows["stage"] == stage
-        ].copy()
-
-        stage_data = stage_data.sort_values(
-            "window_id"
-        )
-
-        bandit = EpsilonGreedyBandit(
-            n_candidates=3,
-            epsilon=0.1,
-            seed=42
-        )
-
-        window_ids = (
-            stage_data["window_id"]
-            .drop_duplicates()
-            .sort_values()
-        )
-
-        for window_id in window_ids:
-
+        for window_id in sorted(stage_data["window_id"].unique()):
             window_data = stage_data[
                 stage_data["window_id"] == window_id
             ]
-
-            if window_data.empty:
-                continue
-
-            candidate = bandit.choose()
 
             selected = window_data[
                 window_data["cand_rank"] == candidate
@@ -167,178 +177,493 @@ def evaluate_bandit(windows):
             if selected.empty:
                 continue
 
-            selected = selected.iloc[0]
-
-            latency = float(
-                selected["p95"]
+            results.append(
+                make_result(
+                    "rule_based",
+                    stage,
+                    window_id,
+                    candidate,
+                    selected.iloc[0],
+                    seed=seed,
+                )
             )
-
-            sla_violation = int(
-                selected["sla_violation"]
-            )
-
-            # Lower latency = better reward
-            reward = -latency
-
-            bandit.update(
-                candidate,
-                reward
-            )
-
-            results.append({
-                "method": "epsilon_greedy_bandit",
-                "stage": stage,
-                "window_id": window_id,
-                "candidate": candidate,
-                "latency_ms": latency,
-                "sla_violation": sla_violation,
-                "reward": reward
-            })
-
-        print(
-            f"  {stage}: "
-            f"candidate selections = "
-            f"{bandit.get_counts()}"
-        )
 
     return pd.DataFrame(results)
 
 
-# ---------------------------------------------------------
-# Calculate metrics
-# ---------------------------------------------------------
+# --------------------------------------------------
+# GENERIC BANDIT EVALUATOR
+# --------------------------------------------------
 
-def calculate_metrics(results):
+def evaluate_bandit_policy(windows, method, seed, epsilon=None):
+    """
+    Run one learning policy over chronological windows.
 
-    summary = []
+    Each stage has its own bandit. The policy sees the
+    selected candidate's latency only after making its choice.
+    """
 
-    for method in results["method"].unique():
+    results = []
 
-        method_data = results[
-            results["method"] == method
-        ]
+    for stage in sorted(windows["stage"].unique()):
+        stage_data = windows[
+            windows["stage"] == stage
+        ].copy()
 
-        average_latency = (
-            method_data["latency_ms"].mean()
+        stage_data = stage_data.sort_values("window_id")
+
+        available_candidates = sorted(
+            stage_data["cand_rank"].unique()
         )
 
-        p95_latency = (
-            method_data["latency_ms"].quantile(0.95)
+        if len(available_candidates) == 0:
+            continue
+
+        # Candidate ranks must be consecutive: 0, 1, 2, ...
+        expected_candidates = list(range(len(available_candidates)))
+
+        if available_candidates != expected_candidates:
+            raise ValueError(
+                f"{stage}: expected candidate ranks "
+                f"{expected_candidates}, found {available_candidates}"
+            )
+
+        n_candidates = len(available_candidates)
+
+        if method == "epsilon_greedy":
+            bandit = EpsilonGreedyBandit(
+                n_candidates=n_candidates,
+                epsilon=epsilon,
+                seed=seed,
+            )
+
+            method_name = f"epsilon_greedy_{epsilon}"
+
+        elif method == "ucb1":
+            bandit = UCB1(n_candidates=n_candidates)
+            method_name = "ucb1"
+
+        elif method == "thompson_sampling":
+            bandit = ThompsonSampling(
+                n_candidates=n_candidates,
+                seed=seed,
+            )
+
+            method_name = "thompson_sampling"
+
+        else:
+            raise ValueError(f"Unknown bandit method: {method}")
+
+        for window_id in sorted(stage_data["window_id"].unique()):
+            window_data = stage_data[
+                stage_data["window_id"] == window_id
+            ]
+
+            candidate = bandit.choose()
+
+            selected = window_data[
+                window_data["cand_rank"] == candidate
+            ]
+
+            if selected.empty:
+                # Do not update the bandit if the chosen
+                # candidate has no observation for this window.
+                continue
+
+            selected_row = selected.iloc[0]
+            latency = float(selected_row["p95"])
+
+            # Bounded reward for bandit learning
+            reward_for_learning = learning_reward(stage, latency)
+
+            bandit.update(candidate, reward_for_learning)
+
+            results.append(
+                make_result(
+                    method_name,
+                    stage,
+                    window_id,
+                    candidate,
+                    selected_row,
+                    seed=seed,
+                )
+            )
+
+    return pd.DataFrame(results)
+
+
+# --------------------------------------------------
+# CALCULATE SUMMARY METRICS
+# --------------------------------------------------
+
+def evaluate_count_policy(windows, method, seed):
+    """Evaluate random and count-based routing policies."""
+
+    results = []
+    policies = {}
+
+    # Give each stage its own routing policy.
+    for stage in windows["stage"].unique():
+        if method == "random":
+            policies[stage] = RandomRouting(seed=seed)
+
+        elif method == "least_loaded":
+            policies[stage] = LeastLoaded(seed=seed)
+
+        elif method == "power_of_two_choices":
+            policies[stage] = PowerOfTwoChoices(seed=seed)
+
+        else:
+            raise ValueError(f"Unknown policy: {method}")
+
+    # Evaluate windows chronologically.
+    ordered = windows.sort_values(["window_id", "stage"])
+
+    for (stage, window_id), group in ordered.groupby(
+        ["stage", "window_id"], sort=False
+    ):
+        policy = policies[stage]
+
+        candidates = sorted(
+            group["cand_rank"].astype(int).unique().tolist()
         )
 
-        sla_rate = (
-            method_data["sla_violation"].mean()
-        )
+        candidate = policy.choose(candidates)
 
-        total_windows = len(method_data)
+        selected = group[
+            group["cand_rank"].astype(int) == candidate
+        ].iloc[0]
 
-        average_reward = method_data["reward"].mean()
-        
-        summary.append({
+        latency = float(selected["p95"])
+
+        results.append({
             "method": method,
-            "average_latency_ms": average_latency,
-            "p95_latency_ms": p95_latency,
-            "sla_violation_rate": sla_rate,
-            "average_reward": average_reward,
-            "windows_evaluated": total_windows
+            "seed": seed,
+            "stage": stage,
+            "window_id": window_id,
+            "candidate": candidate,
+            "latency_ms": latency,
+            "sla_violation": int(selected["sla_violation"]),
+            "reward": -latency,
         })
 
-    return pd.DataFrame(summary)
+        # Update routing counts after making the selection.
+        if hasattr(policy, "update"):
+            policy.update(candidate)
+
+    return pd.DataFrame(results)
+
+def evaluate_linucb(train_windows, test_windows, seed):
+    """Evaluate LinUCB using candidate features learned from training data."""
+
+    feature_columns = [
+        "n_calls",
+        "mean_ms",
+        "p50",
+        "p95",
+        "p99",
+    ]
+
+    # Candidate features are calculated from training data only.
+    candidate_summary = (
+        train_windows.groupby(["stage", "cand_rank"])[feature_columns]
+        .mean()
+        .reset_index()
+    )
+
+    policies = {}
+    results = []
+
+    for stage, group in candidate_summary.groupby("stage"):
+        candidates = sorted(group["cand_rank"].astype(int).unique())
+
+        values = group.set_index("cand_rank")[feature_columns]
+        values = values.loc[candidates].astype(float)
+
+        # Log-transform counts and standardize features within each stage.
+        values["n_calls"] = np.log1p(values["n_calls"].clip(lower=0))
+
+        means = values.mean()
+        stds = values.std(ddof=0).replace(0, 1)
+        values = (values - means) / stds
+
+        # Add an intercept feature.
+        values.insert(0, "intercept", 1.0)
+
+        candidate_features = {
+            candidate: values.loc[candidate].to_numpy(dtype=float)
+            for candidate in candidates
+        }
+
+        policies[stage] = LinUCB(
+            candidate_features=candidate_features,
+            alpha=1.0,
+        )
+
+    # Only test-window outcomes are used as feedback after selection.
+    ordered = test_windows.sort_values(["window_id", "stage"])
+
+    for (stage, window_id), group in ordered.groupby(
+        ["stage", "window_id"], sort=False
+    ):
+        policy = policies[stage]
+
+        candidates = sorted(
+            group["cand_rank"].astype(int).unique().tolist()
+        )
+
+        candidate = policy.choose(candidates)
+
+        selected = group[
+            group["cand_rank"].astype(int) == candidate
+        ].iloc[0]
+
+        latency = float(selected["p95"])
+        reward = learning_reward(stage, latency)
+
+        results.append({
+            "method": "linucb",
+            "seed": seed,
+            "stage": stage,
+            "window_id": window_id,
+            "candidate": candidate,
+            "latency_ms": latency,
+            "sla_violation": int(selected["sla_violation"]),
+            "reward": -latency,
+        })
+
+        policy.update(candidate, reward)
+
+    return pd.DataFrame(results)
 
 
-# ---------------------------------------------------------
-# Main
-# ---------------------------------------------------------
+def evaluate_oracle(test_windows, seed):
+    """
+    Optimistic reference: select the candidate with the lowest
+    observed P95 latency for each stage-window.
+
+    This uses the outcome being evaluated, so it is not deployable.
+    """
+
+    results = []
+
+    ordered = test_windows.sort_values(["window_id", "stage"])
+
+    for (stage, window_id), group in ordered.groupby(
+        ["stage", "window_id"], sort=False
+    ):
+        selected = group.loc[group["p95"].idxmin()]
+
+        results.append({
+            "method": "oracle",
+            "seed": seed,
+            "stage": stage,
+            "window_id": window_id,
+            "candidate": int(selected["cand_rank"]),
+            "latency_ms": float(selected["p95"]),
+            "sla_violation": int(selected["sla_violation"]),
+            "reward": -float(selected["p95"]),
+        })
+
+    return pd.DataFrame(results)
+
+
+def calculate_metrics(results):
+    """Summarize results across seeds with 95% confidence intervals."""
+    if results.empty:
+        raise ValueError("No evaluation results were produced.")
+
+    required = {
+        "method", "seed", "latency_ms",
+        "sla_violation", "reward", "stage", "window_id"
+    }
+    missing = required - set(results.columns)
+    if missing:
+        raise ValueError(f"Missing result columns: {sorted(missing)}")
+
+    # First calculate metrics separately for each method and seed.
+    per_seed = (
+        results.groupby(["method", "seed"], dropna=False)
+        .agg(
+            average_latency_ms=("latency_ms", "mean"),
+            p95_latency_ms=("latency_ms", lambda x: x.quantile(0.95)),
+            p99_latency_ms=("latency_ms", lambda x: x.quantile(0.99)),
+            sla_violation_rate=("sla_violation", "mean"),
+            average_reward=("reward", "mean"),
+            windows_evaluated=("window_id", "nunique"),
+        )
+        .reset_index()
+    )
+
+   
+
+    metric_columns = [
+        "average_latency_ms",
+        "p95_latency_ms",
+        "p99_latency_ms",
+        "sla_violation_rate",
+        "average_reward",
+    ]
+
+    summary_rows = []
+
+    for method, group in per_seed.groupby("method", dropna=False):
+        row = {
+            "method": method,
+            "seeds_evaluated": group["seed"].nunique(),
+            "windows_evaluated": group["windows_evaluated"].mean(),
+        }
+
+        for metric in metric_columns:
+            values = group[metric].dropna().to_numpy(dtype=float)
+            n = len(values)
+
+            mean_value = float(np.mean(values)) if n else float("nan")
+            row[metric] = mean_value
+
+            if n >= 2:
+                critical = float(t.ppf(0.975, df=n - 1))
+                margin = critical * float(np.std(values, ddof=1)) / np.sqrt(n)
+            else:
+                margin = float("nan")
+
+            row[f"{metric}_ci95_low"] = mean_value - margin
+            row[f"{metric}_ci95_high"] = mean_value + margin
+
+        summary_rows.append(row)
+
+    summary = pd.DataFrame(summary_rows).sort_values("method").reset_index(drop=True)
+
+    print("\n===== RESULTS: MEAN ACROSS SEEDS WITH 95% CI =====")
+    print(summary.to_string(index=False))
+
+    return summary
+
+# --------------------------------------------------
+# MAIN
+# --------------------------------------------------
+
 
 def main():
-
-    RESULTS_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     windows, candidates = load_data()
-
     windows = prepare_windows(windows)
 
-    # -----------------------------
-    # Rule-based
-    # -----------------------------
+    # Split the data in chronological order.
+    train, validation, test = chronological_split(windows)
 
-    rule_results = evaluate_rule_based(
-        windows,
-        candidates
-    )
+    print("\nCHRONOLOGICAL DATA SPLIT")
+    print(f"Training windows: {sorted(train['window_id'].unique())}")
+    print(f"Validation windows: {sorted(validation['window_id'].unique())}")
+    print(f"Test windows: {sorted(test['window_id'].unique())}")
 
-    # -----------------------------
-    # Bandit
-    # -----------------------------
+    if train.empty or validation.empty or test.empty:
+        raise ValueError(
+            "Training, validation, and test splits must all contain data."
+        )
 
-    bandit_results = evaluate_bandit(
-        windows
-    )
+    all_results = []
 
-    # -----------------------------
-    # Combine results
-    # -----------------------------
+    # Evaluate every method with the required five seeds.
+    for seed in SEEDS:
+        print(f"\nEvaluating seed {seed}...")
 
-    all_results = pd.concat(
-        [
-            rule_results,
-            bandit_results
-        ],
-        ignore_index=True
-    )
+        # 1. Rule-based baseline
+        print("Running rule-based baseline...")
+        rule_results = evaluate_rule_based(
+            train_windows=train,
+            test_windows=test,
+            seed=seed,
+        )
+        all_results.append(rule_results)
 
-    # -----------------------------
-    # Metrics
-    # -----------------------------
+        # 2. Epsilon-greedy baselines
+        for epsilon in EPSILONS:
+            print(f"Running epsilon-greedy (epsilon={epsilon})...")
+            result = evaluate_bandit_policy(
+                test,
+                method="epsilon_greedy",
+                seed=seed,
+                epsilon=epsilon,
+            )
+            all_results.append(result)
 
-    summary = calculate_metrics(
-        all_results
-    )
+        # 3. UCB1 and Thompson sampling
+        for method in ["ucb1", "thompson_sampling"]:
+            print(f"Running {method} baseline...")
+            result = evaluate_bandit_policy(
+                test,
+                method=method,
+                seed=seed,
+            )
+            all_results.append(result)
 
-    # -----------------------------
-    # Save detailed results
-    # -----------------------------
+        # 4. Random, least-loaded, and power-of-two choices
+        for method in [
+            "random",
+            "least_loaded",
+            "power_of_two_choices",
+        ]:
+            print(f"Running {method} baseline...")
+            result = evaluate_count_policy(
+                windows=test,
+                method=method,
+                seed=seed,
+            )
+            all_results.append(result)
 
-    all_results.to_csv(
-        RESULTS_DIR / "baseline_detailed_results.csv",
-        index=False
-    )
+        # 5. LinUCB — exactly once per seed
+        print("Running LinUCB baseline...")
+        all_results.append(
+            evaluate_linucb(
+                train_windows=train,
+                test_windows=test,
+                seed=seed,
+            )
+        )
 
-    summary.to_csv(
-        RESULTS_DIR / "baseline_comparison.csv",
-        index=False
-    )
+        # 6. Oracle — exactly once per seed
+        print("Running oracle reference...")
+        all_results.append(
+            evaluate_oracle(
+                test_windows=test,
+                seed=seed,
+            )
+        )
 
-    # -----------------------------
-    # Print results
-    # -----------------------------
+    detailed = pd.concat(all_results, ignore_index=True)
+    summary = calculate_metrics(detailed)
 
-    print("\n")
-    print("=" * 70)
-    print("BASELINE COMPARISON")
-    print("=" * 70)
+    run_id = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S_%f")
 
+    detailed_path = RESULTS_DIR / f"baseline_test_detailed_results_{run_id}.csv"
+    summary_path = RESULTS_DIR / f"baseline_test_comparison_{run_id}.csv"
+
+    for path in [detailed_path, summary_path]:
+        if path.exists():
+            raise FileExistsError(
+                f"{path} already exists. Preserve it and choose new "
+                "output filenames before running again."
+            )
+
+    detailed.to_csv(detailed_path, index=False)
+    summary.to_csv(summary_path, index=False)
+
+    print("\nHELD-OUT TEST RESULTS")
+    print("=" * 75)
     print(
         summary.to_string(
             index=False,
-            float_format=lambda x: f"{x:.4f}"
+            float_format=lambda value: f"{value:.4f}",
         )
     )
 
-    print("\nResults saved to:")
+    print("\nSaved detailed test results to:")
+    print(detailed_path)
 
-    print(
-        RESULTS_DIR /
-        "baseline_detailed_results.csv"
-    )
-
-    print(
-        RESULTS_DIR /
-        "baseline_comparison.csv"
-    )
+    print("\nSaved test summary to:")
+    print(summary_path)
 
 
 if __name__ == "__main__":

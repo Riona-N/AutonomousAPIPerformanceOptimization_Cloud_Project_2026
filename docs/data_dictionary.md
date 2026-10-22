@@ -121,3 +121,53 @@ Grain: (stage, candidate, 60 s window).
 5. **PaySim fraud is easy** (fraud empties the origin account), so `fraud_risk` metrics look near-perfect. It is a simulator signal, not a fraud-detection result.
 6. **Candidates are stand-ins for replicas of one service.** Per stage we take the 10 busiest Alibaba services and choose the 3 whose long-run P95 is closest, then rescale any leftover gap so all three share one speed level. Reason: the 3 busiest services differ permanently in speed, and then a one-line rule ("pick the fastest") solves routing and there is nothing left to learn. After this step candidates differ only in how they fluctuate over time. The diagnostics in `alibaba_meta.json` show the speed spread before and after.
 7. **Latency model is empirical, not parametric.** A lognormal fit was tried first and rejected: real response times are a lump of near-zero calls plus a long tail, and it overestimated P95 by about 2x. Stage latencies inside one window are drawn independently, so within-request correlation between stages is not modelled.
+
+
+## 6. PaySim–Alibaba linkage methodology (F10)
+
+### Purpose and limitation
+
+PaySim supplies synthetic payment transactions and hourly traffic information. Alibaba supplies anonymised microservice response-time observations. The datasets do not share transaction identifiers or a common real-world timeline. Therefore, the pipeline constructs a synthetic mapping between PaySim time slots and Alibaba latency windows rather than performing a direct transaction-ID or calendar-time join.
+
+This mapping associates higher PaySim traffic with higher Alibaba backend stress. It is a simulation assumption, not evidence that PaySim transactions caused the observed Alibaba traffic or latency.
+
+### Rule A: Traffic-based time alignment
+
+1. **Generate PaySim timestamps:** In `src/ml_model/preprocessing.py`, `ts_sec` is calculated from the hourly `step` plus a uniformly random offset between 0 and 3600 seconds.
+2. **Rank hourly traffic:** `src/simulation/build_linkage.py` counts transactions per hour and calculates percentile ranks using `rank(pct=True)`. The ranks are mapped to positions between `0` and `n_win - 1`, where `n_win` is the number of Alibaba latency windows.
+3. **Rank Alibaba windows by stress:** `LatencyModel.stress_by_window()` sums the P95 latency of candidate 0 across the five stages for each window. Sorting these scores in ascending order produces a calm-to-stressed ordering.
+4. **Map minute slots:** PaySim time is divided into 60-second slots using `floor(ts_sec / 60)`. Each slot inherits the position associated with its hour's traffic rank. Random jitter is added, and the position is clipped to the valid range before being converted to an Alibaba `window_id`.
+5. **Reproducibility:** The shared configuration sets `SEED = 42`. The preprocessing and linkage scripts use seeded NumPy random generators for timestamp placement, jitter, and latency sampling.
+
+The resulting `slot_to_window.parquet` records the mapping from each PaySim minute slot to an Alibaba `window_id`. Each transaction receives its `slot` and corresponding `window_id` in `linkage_tx.parquet`.
+
+### Rule B: Stage latency and baseline outcomes
+
+Every transaction traverses five stages: `ingress`, `auth`, `routing`, `processor`, and `db`.
+
+For the static-policy baseline, the pipeline selects candidate 0 at every stage. `LatencyModel.sample()` draws latency from the stored quantile grid for the selected stage, candidate, and mapped Alibaba window. Values between quantile levels are calculated by linear interpolation. Stage draws are independent, so within-transaction correlation between stage latencies is not modelled.
+
+The five stage latencies are summed to calculate end-to-end latency:
+
+- **Baseline median:** Median end-to-end latency across the linked transaction set.
+- **SLA threshold:** `SLA_MULT * baseline_median_e2e_ms` (currently 2 times the baseline median).
+- **Timeout threshold:** `TIMEOUT_MULT * baseline_median_e2e_ms` (currently 4 times the baseline median).
+- **SLA violation:** End-to-end latency exceeds the SLA threshold.
+- **Success:** End-to-end latency is less than or equal to the timeout threshold.
+
+The thresholds are calculated from the complete linked transaction set in `build_linkage.py`, not separately from the training split. The generated `linkage_meta.json` records the thresholds and static-policy summary metrics.
+
+### Implementation files
+
+- `src/ml_model/preprocessing.py` — creates PaySim `ts_sec` and time-based splits.
+- `src/config.py` — defines `SEED`, the five stages, and SLA/timeout multipliers.
+- `src/linkage_lib.py` — loads Alibaba quantiles, samples latency, and computes the candidate-0 stress score.
+- `src/simulation/build_linkage.py` — performs the mapping and creates the static-policy baseline outcomes.
+
+### Outputs
+
+The linkage pipeline produces the following files under `dataset/processed/`:
+
+- `slot_to_window.parquet` — minute-slot to Alibaba-window mapping.
+- `linkage_tx.parquet` — transaction data, mapped window, and static-policy outcomes.
+- `linkage_meta.json` — SLA and timeout thresholds and baseline summary metrics.

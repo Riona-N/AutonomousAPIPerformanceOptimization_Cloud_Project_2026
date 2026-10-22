@@ -1,0 +1,19 @@
+{
+  "seed": 11,
+  "baseline_median_e2e_ms": 186.92,
+  "sla_ms": 373.84,
+  "timeout_ms": 747.68,
+  "static_policy": {
+    "sla_violation_rate": 0.1863,
+    "success_rate": 0.9856,
+    "p95_e2e_ms": 579.15,
+    "p99_e2e_ms": 791.81
+  },
+  "by_split_sla_violation": {
+    "test": 0.1829,
+    "train": 0.1863,
+    "val": 0.1859
+  },
+  "n_alibaba_windows": 30,
+  "n_minute_slots": 44580
+}

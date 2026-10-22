@@ -219,3 +219,6 @@ __marimo__/
 
 # Stable-Baselines3 local artifacts
 results/toy_ppo_*.zip
+
+# Large generated linkage datasets
+dataset/processed/linkage_seed_*/linkage_tx.parquet

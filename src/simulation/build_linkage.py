@@ -34,7 +34,10 @@ from linkage_lib import LatencyModel
 
 
 def main():
-    rng = np.random.default_rng(SEED)
+    seed = int(sys.argv[1]) if len(sys.argv) > 1 else SEED
+    rng = np.random.default_rng(seed)
+    run_out = OUT / f"linkage_seed_{seed}"
+    run_out.mkdir(parents=True, exist_ok=True)
     tx = pd.read_parquet(OUT / "paysim_clean.parquet",
                          columns=["txn_id", "step", "ts_sec", "type", "amount", "is_fraud", "fraud_risk", "split"])
     lm = LatencyModel(OUT / "stage_latency_windows.parquet")
@@ -53,7 +56,7 @@ def main():
     slot_pos = np.clip(base + rng.integers(-jitter, jitter + 1, n_slots), 0, n_win - 1)
     slot_window = lm.windows[order[slot_pos]]
     slot_to_window = pd.DataFrame({"slot": np.arange(n_slots), "window_id": slot_window})
-    slot_to_window.to_parquet(OUT / "slot_to_window.parquet", index=False)
+    slot_to_window.to_parquet(run_out / "slot_to_window.parquet", index=False)
 
     tx["slot"] = (tx["ts_sec"] // 60).astype(int)
     tx["window_id"] = slot_window[tx["slot"].to_numpy()]
@@ -69,9 +72,9 @@ def main():
     tx["e2e_ms_static"] = e2e
     tx["sla_violation_static"] = (e2e > sla_ms).astype("int8")
     tx["success_static"] = (e2e <= timeout_ms).astype("int8")
-    tx.to_parquet(OUT / "linkage_tx.parquet", index=False)
-
+    tx.to_parquet(run_out / "linkage_tx.parquet", index=False)
     meta = {
+        "seed": seed,
         "baseline_median_e2e_ms": round(base_median, 2), "sla_ms": round(sla_ms, 2), "timeout_ms": round(timeout_ms, 2),
         "static_policy": {
             "sla_violation_rate": round(float(tx["sla_violation_static"].mean()), 4),
@@ -81,7 +84,7 @@ def main():
         "by_split_sla_violation": tx.groupby("split")["sla_violation_static"].mean().round(4).to_dict(),
         "n_alibaba_windows": n_win, "n_minute_slots": n_slots,
     }
-    (OUT / "linkage_meta.json").write_text(json.dumps(meta, indent=2))
+    (run_out / "linkage_meta.json").write_text(json.dumps(meta, indent=2))
     print(json.dumps(meta, indent=2))
 
 
