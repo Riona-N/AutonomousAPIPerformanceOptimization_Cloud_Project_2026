@@ -80,15 +80,21 @@ The F5 training script has been implemented and validated.
 - Added the project-level training entry point at `train/train_ppo.py`.
 - The script uses a fixed `--seed`, writes TensorBoard logs to `results/tensorboard/ppo`, and saves PPO checkpoints under `results/checkpoints/ppo`.
 - It also saves the trained model to `results/ppo_agent.zip` and writes evaluation metrics to `results/ppo_metrics.json`.
+- A unit-style smoke test was added in `tests/test_train_ppo.py` to verify the script runs and produces artifacts with tiny settings.
 
-Validation command:
+Validation commands:
 
 ```powershell
 Set-Location "c:\Users\mousu\AutonomousAPIPerformanceOptimization_Cloud_Project_2026"
 .\RL_env\Scripts\python.exe -m train.train_ppo --timesteps 200 --episodes 1 --checkpoint-freq 50
 ```
 
-Validation result: the script completed successfully and generated training artifacts, including:
+```powershell
+Set-Location "c:\Users\mousu\AutonomousAPIPerformanceOptimization_Cloud_Project_2026"
+.\RL_env\Scripts\python.exe -m pytest tests\test_train_ppo.py -q
+```
+
+Validation result: the script completed successfully and the smoke test passed. Generated artifacts include:
 
 - `results/ppo_agent.zip`
 - `results/ppo_metrics.json`

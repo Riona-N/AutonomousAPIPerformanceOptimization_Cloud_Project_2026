@@ -12,10 +12,10 @@ import pandas as pd
 from gymnasium import spaces
 
 try:
-    from src.config import OUT, STAGES, CANDIDATES_PER_STAGE
+    from src.config import OUT, STAGES, CANDIDATES_PER_STAGE, LATENCY_MULTIPLIER
     from src.linkage_lib import LatencyModel, QCOLS
 except ImportError:
-    from config import OUT, STAGES, CANDIDATES_PER_STAGE
+    from config import OUT, STAGES, CANDIDATES_PER_STAGE, LATENCY_MULTIPLIER
     from linkage_lib import LatencyModel, QCOLS
 
 
@@ -42,6 +42,7 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
         split: str = "train",
         episode_length: int = 512,
         seed: int | None = None,
+        latency_multiplier: float | None = None,
     ) -> None:
         super().__init__()
         self.data_dir = Path(data_dir)
@@ -49,6 +50,9 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
         self.episode_length = episode_length
         self._seed = seed
         self.candidates_per_stage = int(CANDIDATES_PER_STAGE)
+        self.latency_multiplier = float(
+            LATENCY_MULTIPLIER if latency_multiplier is None else latency_multiplier
+        )
 
         tx_path = self.data_dir / "linkage_tx.parquet"
         if not tx_path.exists():
@@ -150,7 +154,7 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
                 for stage_idx in range(len(self.stages))
             ],
             dtype=np.float32,
-        )
+        ) * self.latency_multiplier
         e2e_ms = float(stage_latencies.sum())
         success = e2e_ms <= self.timeout_ms
         sla_violation = e2e_ms > self.sla_ms

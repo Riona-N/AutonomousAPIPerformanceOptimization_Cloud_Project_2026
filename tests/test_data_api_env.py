@@ -106,6 +106,21 @@ def test_observation_shape_uses_configured_candidate_count(routing_data):
     assert env.observation_space.shape == (expected,)
 
 
+def test_latency_multiplier_scale_is_applied(routing_data):
+    env = DataApiRoutingEnv(
+        data_dir=routing_data,
+        split="train",
+        episode_length=1,
+        seed=7,
+        latency_multiplier=0.0,
+    )
+    env.reset(options={"start": 0})
+
+    _, _, _, _, info = env.step(np.zeros(len(STAGES), dtype=np.int64))
+    assert np.allclose(info["stage_latencies_ms"], 0.0)
+    assert info["e2e_ms"] == 0.0
+
+
 def test_step_rejects_after_termination(routing_data):
     env = make_env(routing_data, episode_length=1)
     env.reset(options={"start": 0})
