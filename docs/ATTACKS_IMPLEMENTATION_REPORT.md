@@ -8,8 +8,8 @@ The requested work includes:
 
 - `AttackWrapper` base class
 - A1 telemetry poisoning
-- A2 observation perturbation with random, FGSM, and PGD variants
-- A5 risk-score poisoning using the Aparajita fraud-risk function
+- A2 observation perturbation with random, FGSM, PGD, and learned PPO variants
+- A5 risk-score poisoning
 - A6 metric replay
 
 ## What was implemented
@@ -57,8 +57,29 @@ These attacks follow the attack specification in the guide:
 - random perturbation: bounded uniform noise within `epsilon`
 - FGSM: one-step sign attack using a surrogate gradient from the policy
 - PGD: iterative projected gradient attack with 10 steps and step-size `epsilon / 4`
+- learned adversary: a second PPO policy outputs an observation-sized perturbation vector bounded by `epsilon`; it is trained against a frozen routing policy with reward equal to the negative of the router's reward
 
-If no policy is available, the code falls back to random perturbation so the wrapper remains usable in a test or lightweight setup.
+FGSM and PGD fall back to random perturbation if no surrogate policy is available. The learned PPO wrapper instead requires its trained policy and raises a clear error if it is missing.
+
+#### Learned A2 adversary training
+
+The learned attack implementation adds:
+
+- `LearnedAdversaryEnv`, which exposes the clean routing observation to the adversary and bounds its continuous action to `[-epsilon, epsilon]` per feature.
+- `train/train_adversary_ppo.py`, which loads the existing router PPO artifact once, uses it only for deterministic action selection, and trains a separate PPO model to maximize the negative router reward.
+- `LearnedAdversaryAttack`, which loads as an `AttackWrapper` policy through `AttackConfig.policy` and applies its bounded perturbation to the observation seen by the router.
+
+Train the adversary from the repository root with:
+
+```powershell
+.\RL_env\Scripts\python.exe -m train.train_adversary_ppo `
+  --router-path results\ppo_agent.zip `
+  --output-path results\adversary_ppo `
+  --timesteps 50000 `
+  --epsilon 0.1
+```
+
+The router artifact is not updated during adversary training. The adversary artifact is saved as `results/adversary_ppo.zip` by default. At inference, load it with `PPO.load(...)` and pass it as the `policy` in an A2 `AttackConfig` alongside the same `epsilon`.
 
 ### 4) A5 — Risk-score poisoning via the project risk signal
 
@@ -76,7 +97,7 @@ This attack keeps a short observation history and, while active, replays a metri
 
 ## Validation status
 
-The attack logic was validated with a focused pytest run covering both existing environment checks and the new attack smoke tests.
+The attack logic was validated with a focused pytest run covering the environment, attack wrappers, and training smoke tests. The learned-adversary tests check the epsilon bound, adversarial reward sign, and inference-wrapper perturbation bound. The training entry point was also run for 8 timesteps against the saved router artifact and successfully wrote an adversary checkpoint in a temporary directory. That checkpoint was loaded through `LearnedAdversaryAttack`; inference passed with an observation shape of 83 and a maximum perturbation of approximately 0.0622 for `epsilon=0.1`.
 
 Command run:
 
@@ -87,13 +108,15 @@ Set-Location "c:\Users\mousu\AutonomousAPIPerformanceOptimization_Cloud_Project_
 
 Result:
 
-- 12 passed
+- 14 passed
 
 ## Files added/updated
 
 - `attacks/__init__.py`
+- `attacks/adversary.py`
 - `attacks/base.py`
 - `attacks/wrappers.py`
+- `train/train_adversary_ppo.py`
 - `tests/test_attacks.py`
 - `docs/ATTACKS_IMPLEMENTATION_REPORT.md`
 

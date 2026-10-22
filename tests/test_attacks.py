@@ -2,6 +2,8 @@ import numpy as np
 
 from attacks import (
     AttackConfig,
+    LearnedAdversaryAttack,
+    LearnedAdversaryEnv,
     MetricReplayAttack,
     RandomObservationAttack,
     RiskAttack,
@@ -10,6 +12,16 @@ from attacks import (
 from src.config import STAGES
 from src.linkage_lib import QCOLS
 from src.ml_model.data_api_env import DataApiRoutingEnv
+
+
+class FixedPolicy:
+    def __init__(self, action):
+        self.action = action
+        self.last_observation = None
+
+    def predict(self, observation, deterministic=True):
+        self.last_observation = np.asarray(observation).copy()
+        return self.action, None
 
 
 def make_env(tmp_path):
@@ -94,3 +106,34 @@ def test_risk_attack_changes_risk_signal(tmp_path):
     metric_len = len(STAGES) * env.candidates_per_stage * env.metrics_per_candidate
     risk_idx = metric_len + len(env.transaction_types) + 1
     assert np.abs(obs[risk_idx] - info["true_obs"][risk_idx]) > 0
+
+
+def test_learned_adversary_env_uses_bounded_perturbation_and_negative_reward(tmp_path):
+    data_dir = make_env(tmp_path)
+    env = DataApiRoutingEnv(data_dir=data_dir, split="train", episode_length=2)
+    router = FixedPolicy(np.zeros(len(STAGES), dtype=np.int64))
+    adversary_env = LearnedAdversaryEnv(env, router, epsilon=0.1)
+    observation, _ = adversary_env.reset(seed=11, options={"start": 0})
+
+    perturbation = np.full(observation.shape, 0.1, dtype=np.float32)
+    _, adversary_reward, _, _, info = adversary_env.step(perturbation)
+
+    assert router.last_observation is not None
+    assert np.max(np.abs(router.last_observation - observation)) <= 0.1
+    assert adversary_reward == -info["router_reward"]
+    assert np.isclose(info["perturbation_linf"], 0.1)
+
+
+def test_learned_adversary_wrapper_applies_policy_output_with_epsilon_bound(tmp_path):
+    data_dir = make_env(tmp_path)
+    env = DataApiRoutingEnv(data_dir=data_dir, split="train", episode_length=2, seed=7)
+    policy = FixedPolicy(np.full(env.observation_space.shape, 0.5, dtype=np.float32))
+    attack = LearnedAdversaryAttack(
+        env,
+        AttackConfig(id="A2-learned", epsilon=0.1, policy=policy),
+    )
+
+    observation, info = attack.reset(options={"start": 0})
+
+    assert info["attack_active"] is True
+    assert np.max(np.abs(observation - info["true_obs"])) <= 0.1

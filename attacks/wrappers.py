@@ -4,6 +4,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import Any
 
+import gymnasium as gym
 import numpy as np
 import pandas as pd
 
@@ -13,6 +14,7 @@ except ImportError:  # pragma: no cover - optional dependency handling
     torch = None
 
 from .base import AttackWrapper
+from .adversary import apply_bounded_perturbation
 
 
 class TelemetryPoison(AttackWrapper):
@@ -64,6 +66,25 @@ class RandomObservationAttack(AttackWrapper):
             size=obs.shape,
         )
         return np.clip(obs + delta, 0.0, 1.0)
+
+
+class LearnedAdversaryAttack(AttackWrapper):
+    """A2 learned attack: apply perturbations from a trained adversary PPO policy."""
+
+    def perturb(self, obs: np.ndarray) -> np.ndarray:
+        policy = getattr(self.cfg, "policy", None)
+        if policy is None:
+            raise ValueError("LearnedAdversaryAttack requires a trained PPO policy")
+
+        epsilon = float(getattr(self.cfg, "epsilon", 0.1))
+        if epsilon <= 0:
+            raise ValueError("epsilon must be greater than zero")
+        perturbation, _ = policy.predict(obs, deterministic=True)
+        delta = np.asarray(perturbation, dtype=np.float32).reshape(obs.shape)
+        observation_space = self.env.observation_space
+        if isinstance(observation_space, gym.spaces.Box):
+            return apply_bounded_perturbation(obs, delta, epsilon, observation_space)
+        return (obs + np.clip(delta, -epsilon, epsilon)).astype(np.float32, copy=False)
 
 
 class FGSMObservationAttack(AttackWrapper):
@@ -147,7 +168,7 @@ class RiskAttack(AttackWrapper):
         for candidate in candidates:
             if not candidate.exists():
                 continue
-            spec = spec_from_file_location("apara_risk_mod", candidate)
+            spec = spec_from_file_location("project_risk_mod", candidate)
             if spec is None or spec.loader is None:
                 continue
             module = module_from_spec(spec)
