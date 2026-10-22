@@ -12,10 +12,10 @@ import pandas as pd
 from gymnasium import spaces
 
 try:
-    from src.config import OUT, STAGES
+    from src.config import OUT, STAGES, CANDIDATES_PER_STAGE
     from src.linkage_lib import LatencyModel, QCOLS
 except ImportError:
-    from config import OUT, STAGES
+    from config import OUT, STAGES, CANDIDATES_PER_STAGE
     from linkage_lib import LatencyModel, QCOLS
 
 
@@ -33,7 +33,7 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
     metadata = {"render_modes": []}
     stages = tuple(STAGES)
     transaction_types = ("CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER")
-    candidates_per_stage = 3
+    candidates_per_stage = CANDIDATES_PER_STAGE
     metrics_per_candidate = 5
 
     def __init__(
@@ -48,6 +48,7 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
         self.split = split
         self.episode_length = episode_length
         self._seed = seed
+        self.candidates_per_stage = int(CANDIDATES_PER_STAGE)
 
         tx_path = self.data_dir / "linkage_tx.parquet"
         if not tx_path.exists():
@@ -65,11 +66,27 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
         self.sla_ms = float(metadata["sla_ms"])
         self.timeout_ms = float(metadata["timeout_ms"])
         self.latency_model = LatencyModel(self.data_dir / "stage_latency_windows.parquet")
+        self._valid_window_ids = {int(window) for window in self.latency_model.windows}
         metrics = pd.read_parquet(self.data_dir / "stage_latency_windows.parquet")
         self._metric_values = self._build_metric_tensor(metrics)
-        self._slot_to_window = pd.read_parquet(self.data_dir / "slot_to_window.parquet")[
-            "window_id"
-        ].to_numpy()
+        slot_mapping = pd.read_parquet(self.data_dir / "slot_to_window.parquet")
+        missing_mapping_columns = {"slot", "window_id"}.difference(slot_mapping.columns)
+        if missing_mapping_columns:
+            raise ValueError(
+                f"Slot-to-window table is missing columns: {sorted(missing_mapping_columns)}"
+            )
+        slot_values = pd.to_numeric(slot_mapping["slot"], errors="raise")
+        if (
+            slot_values.isna().any()
+            or (slot_values < 0).any()
+            or not np.equal(slot_values, np.floor(slot_values)).all()
+        ):
+            raise ValueError("Slot-to-window table must contain non-negative integer slots")
+        if slot_values.duplicated().any():
+            raise ValueError("Slot-to-window table contains duplicate slots")
+        self._slot_to_window = dict(
+            zip(slot_values.astype(np.int64), slot_mapping["window_id"])
+        )
         self.amount_scale = max(
             1.0,
             float(np.nanpercentile(self.transactions["amount"].to_numpy(dtype=float), 99.9)),
@@ -110,11 +127,16 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
     def step(
         self, action: np.ndarray | list[int] | tuple[int, ...]
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+        episode_len = min(self.episode_length, len(self.transactions) - self._episode_start)
+        if self._position >= episode_len:
+            raise RuntimeError("Cannot call step() after termination. Call reset() first.")
+
         action_array = np.asarray(action, dtype=np.int64)
         if not self.action_space.contains(action_array):
             raise ValueError("Action must contain one candidate index (0..2) per stage")
 
         row = self.transactions.iloc[self._episode_start + self._position]
+        self._window_for_slot(int(row["slot"]))
         window_ids = np.full(len(self.stages), int(row["window_id"]), dtype=np.int64)
         uniforms = self.np_random.random(len(self.stages))
         stage_latencies = np.asarray(
@@ -156,6 +178,24 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
         }
         return self._observation(), float(reward), terminated, False, info
 
+    def _window_for_slot(self, slot: int) -> int:
+        try:
+            window_id = self._slot_to_window[slot]
+        except KeyError as exc:
+            raise ValueError(f"No window mapping found for slot={slot}") from exc
+        if pd.isna(window_id):
+            raise ValueError(f"Slot {slot} maps to a missing window")
+        try:
+            normalized_window_id = int(window_id)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Slot {slot} maps to an invalid window: {window_id!r}") from exc
+        if (
+            normalized_window_id != window_id
+            or normalized_window_id not in self._valid_window_ids
+        ):
+            raise ValueError(f"Slot {slot} maps to an invalid window: {window_id!r}")
+        return normalized_window_id
+
     def _build_metric_tensor(self, metrics: pd.DataFrame) -> np.ndarray:
         windows = self.latency_model.windows
         tensor = np.zeros(
@@ -186,8 +226,9 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
         )
         row = self.transactions.iloc[row_index]
         slot = int(row["slot"])
+        self._window_for_slot(slot)
         previous_slot = max(0, slot - 1)
-        previous_window = int(self._slot_to_window[previous_slot])
+        previous_window = self._window_for_slot(previous_slot)
         window_index = int(np.searchsorted(self.latency_model.windows, previous_window))
         metric_features = self._metric_values[:, :, window_index, :].reshape(-1)
         type_features = np.asarray(
