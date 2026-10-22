@@ -22,6 +22,7 @@ class AttackConfig:
     steps: int = 10
     step_size: float | None = None
     policy: Any | None = None
+    risk_bias: float = 0.25
 
 
 class AttackWrapper(gym.Wrapper):

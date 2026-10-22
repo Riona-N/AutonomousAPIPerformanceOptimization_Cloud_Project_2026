@@ -6,6 +6,7 @@ from .wrappers import (
     MetricReplayAttack,
     PGDObservationAttack,
     RandomObservationAttack,
+    RiskAttack,
     TelemetryPoison,
 )
 
@@ -17,4 +18,5 @@ __all__ = [
     "FGSMObservationAttack",
     "PGDObservationAttack",
     "MetricReplayAttack",
+    "RiskAttack",
 ]

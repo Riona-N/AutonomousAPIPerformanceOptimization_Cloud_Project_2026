@@ -1,6 +1,12 @@
 import numpy as np
 
-from attacks import AttackConfig, MetricReplayAttack, RandomObservationAttack, TelemetryPoison
+from attacks import (
+    AttackConfig,
+    MetricReplayAttack,
+    RandomObservationAttack,
+    RiskAttack,
+    TelemetryPoison,
+)
 from src.config import STAGES
 from src.linkage_lib import QCOLS
 from src.ml_model.data_api_env import DataApiRoutingEnv
@@ -75,3 +81,16 @@ def test_metric_replay_uses_previous_obs(tmp_path):
 
     assert info["attack_active"] is True
     assert obs2.shape == obs1.shape
+
+
+def test_risk_attack_changes_risk_signal(tmp_path):
+    data_dir = make_env(tmp_path)
+    env = DataApiRoutingEnv(data_dir=data_dir, split="train", episode_length=2, seed=7)
+    cfg = AttackConfig(id="A5", seed=7, start=0, duration=5, risk_bias=0.25)
+    attack = RiskAttack(env, cfg)
+    obs, info = attack.reset(options={"start": 0})
+
+    assert info["attack_active"] is True
+    metric_len = len(STAGES) * env.candidates_per_stage * env.metrics_per_candidate
+    risk_idx = metric_len + len(env.transaction_types) + 1
+    assert np.abs(obs[risk_idx] - info["true_obs"][risk_idx]) > 0

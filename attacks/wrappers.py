@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 try:
     import torch
@@ -124,4 +127,72 @@ class MetricReplayAttack(AttackWrapper):
         if source.shape[0] < block_size:
             return out
         out[:block_size] = source[:block_size]
+        return out
+
+
+class RiskAttack(AttackWrapper):
+    """A5: push the policy's risk signal toward a malicious fraud-risk score.
+
+    The attack tries to use a project risk function if it is available in the repo,
+    and otherwise falls back to the current environment fraud_risk feature plus a bounded
+    estimate from the transaction amount.
+    """
+
+    @staticmethod
+    def _load_risk_function():
+        candidates = [
+            Path(__file__).resolve().parents[1] / "data" / "risk.py",
+            Path(__file__).resolve().parents[2] / "data" / "risk.py",
+        ]
+        for candidate in candidates:
+            if not candidate.exists():
+                continue
+            spec = spec_from_file_location("apara_risk_mod", candidate)
+            if spec is None or spec.loader is None:
+                continue
+            module = module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if hasattr(module, "fraud_risk"):
+                return module.fraud_risk
+        return None
+
+    def _estimated_risk(self, row: pd.Series) -> float:
+        risk_fn = self._load_risk_function()
+        if risk_fn is not None:
+            try:
+                score = np.asarray(risk_fn(pd.DataFrame([row])), dtype=np.float32)
+                if score.size:
+                    return float(np.clip(score[0], 0.0, 1.0))
+            except Exception:
+                pass
+
+        base = float(row.get("fraud_risk", 0.0))
+        amount = float(row.get("amount", 0.0))
+        amount_scale = getattr(self.env, "amount_scale", 1.0)
+        normalized = np.clip(np.log1p(amount) / np.log1p(max(float(amount_scale), 1.0)), 0.0, 1.0)
+        type_bias = {
+            "CASH_IN": 0.15,
+            "CASH_OUT": 0.20,
+            "DEBIT": 0.10,
+            "PAYMENT": 0.25,
+            "TRANSFER": 0.30,
+        }.get(str(row.get("type", "")).upper(), 0.0)
+        return float(np.clip(base * 0.6 + normalized * 0.3 + type_bias * 0.1, 0.0, 1.0))
+
+    def perturb(self, obs: np.ndarray) -> np.ndarray:
+        out = obs.copy()
+        if not hasattr(self.env, "transactions"):
+            return out
+
+        row_index = int(getattr(self.env, "_episode_start", 0)) + int(getattr(self.env, "_position", 0))
+        row_index = min(max(row_index, 0), len(self.env.transactions) - 1)
+        row = self.env.transactions.iloc[row_index]
+        risk_score = self._estimated_risk(row)
+        risk_bias = float(getattr(self.cfg, "risk_bias", 0.25))
+        target_risk = float(np.clip(risk_score + risk_bias, 0.0, 1.0))
+
+        metric_len = self.stage_count * self.candidate_count * self.metric_count
+        risk_idx = metric_len + len(getattr(self.env, "transaction_types", ())) + 1
+        if 0 <= risk_idx < out.shape[0]:
+            out[risk_idx] = target_risk
         return out

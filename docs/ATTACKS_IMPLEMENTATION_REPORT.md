@@ -9,6 +9,7 @@ The requested work includes:
 - `AttackWrapper` base class
 - A1 telemetry poisoning
 - A2 observation perturbation with random, FGSM, and PGD variants
+- A5 risk-score poisoning using the Aparajita fraud-risk function
 - A6 metric replay
 
 ## What was implemented
@@ -59,7 +60,15 @@ These attacks follow the attack specification in the guide:
 
 If no policy is available, the code falls back to random perturbation so the wrapper remains usable in a test or lightweight setup.
 
-### 4) A6 — Metric replay
+### 4) A5 — Risk-score poisoning via the project risk signal
+
+Implemented via `RiskAttack`.
+
+This wrapper treats the fraud-risk score as a first-class attack surface. The implementation tries to load a project-level risk function when available, and otherwise falls back to the environment's current fraud-risk value plus a bounded estimate derived from the transaction amount and type. While active, the wrapper rewrites the observation's risk feature toward a higher malicious value using a configurable `risk_bias`, so the policy sees a riskier transaction than the true signal indicates.
+
+This matches the project pattern of keeping the actual environment unchanged while modifying only what the policy observes. It is therefore consistent with the wrapper-based attack design used for A1, A2, and A6.
+
+### 5) A6 — Metric replay
 
 Implemented via `MetricReplayAttack`.
 
@@ -78,14 +87,15 @@ Set-Location "c:\Users\mousu\AutonomousAPIPerformanceOptimization_Cloud_Project_
 
 Result:
 
-- 11 passed
+- 12 passed
 
-## Files added
+## Files added/updated
 
 - `attacks/__init__.py`
 - `attacks/base.py`
 - `attacks/wrappers.py`
 - `tests/test_attacks.py`
+- `docs/ATTACKS_IMPLEMENTATION_REPORT.md`
 
 ## Notes
 
