@@ -43,6 +43,10 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
         episode_length: int = 512,
         seed: int | None = None,
         latency_multiplier: float | None = None,
+        reward_beta: float = 0.0,
+        reward_gamma: float = 0.0,
+        reward_delta: float = 0.0,
+        reward_trust_threshold: float = 0.5,
     ) -> None:
         super().__init__()
         self.data_dir = Path(data_dir)
@@ -53,6 +57,14 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
         self.latency_multiplier = float(
             LATENCY_MULTIPLIER if latency_multiplier is None else latency_multiplier
         )
+        self.reward_beta = float(reward_beta)
+        self.reward_gamma = float(reward_gamma)
+        self.reward_delta = float(reward_delta)
+        self.reward_trust_threshold = float(reward_trust_threshold)
+        if min(self.reward_beta, self.reward_gamma, self.reward_delta) < 0.0:
+            raise ValueError("D4 reward weights must be non-negative")
+        if not 0.0 <= self.reward_trust_threshold <= 1.0:
+            raise ValueError("reward_trust_threshold must be within [0, 1]")
 
         tx_path = self.data_dir / "linkage_tx.parquet"
         if not tx_path.exists():
@@ -159,12 +171,34 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
         success = e2e_ms <= self.timeout_ms
         sla_violation = e2e_ms > self.sla_ms
         fraud_risk = float(row["fraud_risk"])
-        reward = (
+        base_reward = (
             (1.0 if success else -1.0)
             - e2e_ms / self.sla_ms
             - 0.75 * float(sla_violation)
             + 0.20 * (1.0 - fraud_risk)
         )
+        decision_metrics = self._decision_metrics()
+        chosen_trust = decision_metrics[
+            np.arange(len(self.stages)), action_array, 0
+        ]
+        low_trust_fraction = float(
+            np.mean(chosen_trust < self.reward_trust_threshold)
+        )
+        cost = 0.0
+        normalized_fraud_value = 0.0
+        fraud_label = (
+            float(row["is_fraud"])
+            if "is_fraud" in row.index and pd.notna(row["is_fraud"])
+            else 0.0
+        )
+        if fraud_label >= 0.5 and fraud_risk < self.reward_trust_threshold:
+            normalized_fraud_value = float(
+                np.clip(np.log1p(float(row["amount"])) / np.log1p(self.amount_scale), 0.0, 1.0)
+            )
+        cost_penalty = self.reward_beta * cost
+        low_trust_penalty = self.reward_gamma * low_trust_fraction
+        fraud_value_penalty = self.reward_delta * normalized_fraud_value
+        reward = base_reward - cost_penalty - low_trust_penalty - fraud_value_penalty
 
         self._position += 1
         terminated = self._position >= min(
@@ -179,8 +213,29 @@ class DataApiRoutingEnv(gym.Env[np.ndarray, np.ndarray]):
             "slot": int(row["slot"]),
             "window_id": int(row["window_id"]),
             "action": action_array.copy(),
+            "reward_terms": {
+                "base_reward": float(base_reward),
+                "cost": cost,
+                "cost_penalty": float(cost_penalty),
+                "low_trust_fraction": low_trust_fraction,
+                "low_trust_penalty": float(low_trust_penalty),
+                "normalized_fraud_value": normalized_fraud_value,
+                "fraud_value_penalty": float(fraud_value_penalty),
+            },
         }
         return self._observation(), float(reward), terminated, False, info
+
+    def _decision_metrics(self) -> np.ndarray:
+        observation = self._observation()
+        metric_values = observation[
+            : len(self.stages) * self.candidates_per_stage * self.metrics_per_candidate
+        ].reshape(
+            len(self.stages), self.candidates_per_stage, self.metrics_per_candidate
+        )
+        call_support = np.clip(metric_values[:, :, 3], 0.0, 1.0)
+        sla_compliance = 1.0 - np.clip(metric_values[:, :, 4], 0.0, 1.0)
+        trust = np.clip(call_support * sla_compliance, 0.0, 1.0)
+        return np.stack([trust, metric_values[:, :, 1]], axis=-1)
 
     def _window_for_slot(self, slot: int) -> int:
         try:

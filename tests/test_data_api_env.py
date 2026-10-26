@@ -130,3 +130,50 @@ def test_step_rejects_after_termination(routing_data):
 
     with pytest.raises(RuntimeError, match=r"Cannot call step\(\) after termination"):
         env.step(np.zeros(len(STAGES), dtype=np.int64))
+
+
+def test_d4_reward_weights_are_zero_by_default(routing_data):
+    env = make_env(routing_data)
+    env.reset(options={"start": 0})
+
+    _, reward, _, _, info = env.step(np.zeros(len(STAGES), dtype=np.int64))
+
+    assert reward == info["reward_terms"]["base_reward"]
+    assert info["reward_terms"]["cost_penalty"] == 0.0
+    assert info["reward_terms"]["low_trust_penalty"] == 0.0
+    assert info["reward_terms"]["fraud_value_penalty"] == 0.0
+
+
+def test_d4_reward_applies_low_trust_and_labeled_low_risk_penalties(routing_data):
+    tx_path = routing_data / "linkage_tx_sample.parquet"
+    transactions = pd.read_parquet(tx_path)
+    transactions["is_fraud"] = [1, 0, 0]
+    transactions.to_parquet(tx_path)
+    env = DataApiRoutingEnv(
+        data_dir=routing_data,
+        split="train",
+        episode_length=3,
+        seed=7,
+        reward_beta=0.8,
+        reward_gamma=0.5,
+        reward_delta=0.7,
+    )
+    env.reset(options={"start": 0})
+
+    _, reward, _, _, info = env.step(np.zeros(len(STAGES), dtype=np.int64))
+    terms = info["reward_terms"]
+
+    assert terms["cost"] == 0.0
+    assert terms["cost_penalty"] == 0.0
+    assert terms["low_trust_fraction"] == 1.0
+    assert terms["low_trust_penalty"] == 0.5
+    assert terms["normalized_fraud_value"] == 1.0
+    assert terms["fraud_value_penalty"] == 0.7
+    assert reward == pytest.approx(terms["base_reward"] - 1.2)
+
+
+def test_d4_reward_rejects_negative_weights_or_invalid_threshold(routing_data):
+    with pytest.raises(ValueError, match="weights"):
+        DataApiRoutingEnv(data_dir=routing_data, reward_gamma=-0.1)
+    with pytest.raises(ValueError, match="threshold"):
+        DataApiRoutingEnv(data_dir=routing_data, reward_trust_threshold=1.1)
