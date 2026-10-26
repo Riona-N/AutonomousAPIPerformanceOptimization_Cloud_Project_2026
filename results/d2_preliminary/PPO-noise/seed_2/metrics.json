@@ -1,0 +1,14 @@
+{
+  "version": "PPO-noise",
+  "seed": 2,
+  "timesteps": 2000,
+  "observation_shape": [
+    83
+  ],
+  "post_training_final_evaluation": {
+    "step": 2048,
+    "mean_reward": 233.8031190490691,
+    "success_rate": 0.994140625,
+    "phase": "post_training_final"
+  }
+}

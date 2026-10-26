@@ -1,0 +1,8 @@
+{
+  "version": "CQL",
+  "seed": 1,
+  "timesteps": 2000,
+  "updates": 2000,
+  "offline_samples": 2000,
+  "offline_behavior": "50% static candidate-0 policy, 50% random policy"
+}

@@ -1,0 +1,20 @@
+{
+  "versions": [
+    "PPO-clean",
+    "PPO-noise",
+    "PPO-PGD",
+    "PPO-ATLA",
+    "PPO-trust",
+    "PPO-trust-ATLA",
+    "CQL",
+    "IQL"
+  ],
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "timesteps": 2000
+}

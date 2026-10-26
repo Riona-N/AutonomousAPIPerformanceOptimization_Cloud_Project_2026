@@ -1,0 +1,14 @@
+{
+  "version": "PPO-clean",
+  "seed": 0,
+  "timesteps": 2000,
+  "observation_shape": [
+    83
+  ],
+  "post_training_final_evaluation": {
+    "step": 2048,
+    "mean_reward": 205.39511048694362,
+    "success_rate": 0.9915364583333334,
+    "phase": "post_training_final"
+  }
+}
