@@ -1,1 +1,1 @@
-"""AWS deployment and inference helpers for the Role 1 policy."""
+"""AWS deployment, inference, and cloud infrastructure components."""

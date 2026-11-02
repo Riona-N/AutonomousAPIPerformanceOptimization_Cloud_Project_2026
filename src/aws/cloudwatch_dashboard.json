@@ -1,0 +1,107 @@
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "stacked": false,
+        "metrics": [
+          [ "AutonomousPaymentAPI", "EndToEndLatency", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "label": "E2E Latency (ms)", "color": "#1f77b4" } ]
+        ],
+        "annotations": {
+          "horizontal": [
+            { "label": "SLA Threshold (374.19 ms)", "value": 374.19, "fill": "below", "color": "#ff7f0e" },
+            { "label": "Timeout Threshold (748.38 ms)", "value": 748.38, "fill": "above", "color": "#d62728" }
+          ]
+        },
+        "region": "us-east-1",
+        "title": "End-to-End Transaction Latency vs SLA Limits",
+        "period": 60,
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "label": "Milliseconds"
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "stacked": false,
+        "metrics": [
+          [ "AutonomousPaymentAPI", "SLAViolation", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "stat": "Average", "label": "SLA Violation Rate", "color": "#d62728" } ],
+          [ "AutonomousPaymentAPI", "TransactionSuccess", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "stat": "Average", "label": "Success Rate", "color": "#2ca02c" } ]
+        ],
+        "region": "us-east-1",
+        "title": "SLA Violation Rate vs Success Rate",
+        "period": 60,
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 1,
+            "label": "Rate (0.0 to 1.0)"
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "stacked": false,
+        "metrics": [
+          [ "AutonomousPaymentAPI", "RLReward", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "stat": "Average", "label": "Mean RL Step Reward", "color": "#9467bd" } ]
+        ],
+        "region": "us-east-1",
+        "title": "Autonomous RL Multi-Objective Reward Progression",
+        "period": 60,
+        "yAxis": {
+          "left": {
+            "label": "Reward Value"
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "stacked": false,
+        "metrics": [
+          [ "AutonomousPaymentAPI", "IngressLatency", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "label": "Ingress" } ],
+          [ "AutonomousPaymentAPI", "AuthLatency", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "label": "Auth" } ],
+          [ "AutonomousPaymentAPI", "RoutingLatency", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "label": "Routing" } ],
+          [ "AutonomousPaymentAPI", "ProcessorLatency", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "label": "Processor" } ],
+          [ "AutonomousPaymentAPI", "DbLatency", "System", "PaymentGateway", "Policy", "Autonomous_RL", { "label": "Database" } ]
+        ],
+        "region": "us-east-1",
+        "title": "Per-Stage Latency Breakdown (5 Stages)",
+        "period": 60,
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "label": "Latency (ms)"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -11,26 +11,35 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from stable_baselines3 import PPO
+
+if TYPE_CHECKING:
+    from stable_baselines3 import PPO
 
 STAGES = ("ingress", "auth", "routing", "processor", "db")
 METRICS_PER_CANDIDATE = 5
 CANDIDATES_PER_STAGE = 3
-DEFAULT_SLA_MS = 1_000.0
-DEFAULT_TIMEOUT_MS = 2_000.0
+DEFAULT_SLA_MS = 374.19
+DEFAULT_TIMEOUT_MS = 748.38
 
 
 def model_fn(model_dir: str) -> PPO:
     """Load the SB3 artifact from SageMaker's model directory."""
+    from stable_baselines3 import PPO
+
     root = Path(model_dir)
-    candidates = (root / "data_ppo_agent.zip", root / "model.zip", root / "data_ppo_agent")
+    candidates = (
+        root / "data_ppo_agent.zip",
+        root / "ppo_agent.zip",
+        root / "model.zip",
+        root / "data_ppo_agent",
+    )
     model_path = next((path for path in candidates if path.exists()), None)
     if model_path is None:
         raise FileNotFoundError(
-            f"No PPO artifact found in {root}; expected data_ppo_agent.zip or model.zip"
+            f"No PPO artifact found in {root}; expected data_ppo_agent.zip, ppo_agent.zip, or model.zip"
         )
     return PPO.load(str(model_path), device="cpu")
 
@@ -57,7 +66,7 @@ def _as_request_instances(payload: Any) -> list[tuple[np.ndarray, dict[str, Any]
             raise ValueError("Each instance must contain an observation")
         values = np.asarray(observation, dtype=np.float32)
         if values.ndim != 1 or values.size != 83:
-            raise ValueError("Each observation must contain exactly 83 numeric values")
+            raise ValueError(f"Each observation must contain exactly 83 numeric values (got {values.size})")
         parsed.append((values, context))
     return parsed
 
@@ -103,7 +112,7 @@ def predict_fn(input_data: Any, model: PPO) -> list[dict[str, Any]]:
         action, _ = model.predict(observation, deterministic=True)
         action_array = np.asarray(action, dtype=np.int64).reshape(-1)
         if action_array.size != len(STAGES):
-            raise ValueError("The loaded policy did not return one action per stage")
+            raise ValueError(f"The loaded policy returned {action_array.size} actions, expected {len(STAGES)}")
         predictions.append(
             {
                 "action": {stage: int(action_array[index]) for index, stage in enumerate(STAGES)},
