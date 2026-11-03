@@ -1,0 +1,33 @@
+{
+  "split_used_for_tuning": "val",
+  "training_split": "train",
+  "grid_combinations": 27,
+  "seeds": [
+    42
+  ],
+  "timesteps_requested": 2048,
+  "timesteps_per_run_actual": [
+    2048
+  ],
+  "selected_weights": null,
+  "weight_identifiability": {
+    "beta": false,
+    "gamma": false,
+    "delta": false
+  },
+  "tuning_status": "not_identifiable_all_penalty_signals_zero",
+  "selection_score_definition": "mean base reward - mean low-trust fraction - mean normalized fraud value; validation-only, fixed unit weights for model selection",
+  "best_model_path": null,
+  "reference_model_path": "results\\d4_grid\\beta_0_gamma_0_delta_0_seed_42\\model.zip",
+  "cost_data_available": false,
+  "beta_identifiable": false,
+  "validation_observations": {
+    "mean_episode_return_min": 194.7572994318134,
+    "mean_episode_return_max": 194.7572994318134,
+    "mean_cost_min": 0.0,
+    "mean_low_trust_fraction_min": 0.0,
+    "mean_low_trust_fraction_max": 0.0,
+    "mean_normalized_fraud_value_min": 0.0,
+    "mean_normalized_fraud_value_max": 0.0
+  }
+}

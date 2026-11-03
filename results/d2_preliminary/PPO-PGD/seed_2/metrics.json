@@ -1,0 +1,14 @@
+{
+  "version": "PPO-PGD",
+  "seed": 2,
+  "timesteps": 2000,
+  "observation_shape": [
+    83
+  ],
+  "post_training_final_evaluation": {
+    "step": 2048,
+    "mean_reward": 214.6565940394232,
+    "success_rate": 0.9908854166666666,
+    "phase": "post_training_final"
+  }
+}

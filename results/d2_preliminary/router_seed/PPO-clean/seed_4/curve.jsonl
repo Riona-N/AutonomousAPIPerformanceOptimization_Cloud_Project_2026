@@ -1,0 +1,4 @@
+{"step": 512, "mean_reward": 139.85156640504937, "success_rate": 0.984375}
+{"step": 1024, "mean_reward": 139.85156640504937, "success_rate": 0.984375}
+{"step": 1536, "mean_reward": 139.85156640504937, "success_rate": 0.984375}
+{"step": 2048, "mean_reward": 139.85156640504937, "success_rate": 0.984375}

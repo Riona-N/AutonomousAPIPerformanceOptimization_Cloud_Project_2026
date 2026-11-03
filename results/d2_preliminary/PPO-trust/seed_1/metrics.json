@@ -1,0 +1,14 @@
+{
+  "version": "PPO-trust",
+  "seed": 1,
+  "timesteps": 2000,
+  "observation_shape": [
+    98
+  ],
+  "post_training_final_evaluation": {
+    "step": 2048,
+    "mean_reward": 222.00485119307777,
+    "success_rate": 0.9934895833333334,
+    "phase": "post_training_final"
+  }
+}

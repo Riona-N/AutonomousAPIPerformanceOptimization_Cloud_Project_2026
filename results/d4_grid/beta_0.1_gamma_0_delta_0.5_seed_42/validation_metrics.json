@@ -1,0 +1,16 @@
+{
+  "beta": 0.1,
+  "gamma": 0.0,
+  "delta": 0.5,
+  "seed": 42,
+  "timesteps": 2048,
+  "mean_base_reward": 0.38038535045276056,
+  "mean_cost": 0.0,
+  "mean_low_trust_fraction": 0.0,
+  "mean_normalized_fraud_value": 0.0,
+  "mean_sla_violation": 0.19921875,
+  "mean_success": 0.990234375,
+  "mean_episode_return": 194.7572994318134,
+  "std_episode_return": 32.05296398304203,
+  "selection_score": 0.38038535045276056
+}

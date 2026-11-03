@@ -1,0 +1,5 @@
+{"step": 500, "mean_reward": 163.29788260778483, "success_rate": 0.9895833333333334}
+{"step": 1000, "mean_reward": 180.72054655817533, "success_rate": 0.994140625}
+{"step": 1500, "mean_reward": 191.36984595608888, "success_rate": 0.9934895833333334}
+{"step": 2000, "mean_reward": 196.09052938340324, "success_rate": 0.9915364583333334}
+{"step": 2048, "mean_reward": 216.09403686007545, "success_rate": 0.9947916666666666, "phase": "post_training_final"}

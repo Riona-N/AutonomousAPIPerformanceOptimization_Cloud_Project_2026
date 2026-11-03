@@ -1,0 +1,14 @@
+{
+  "version": "PPO-trust-ATLA",
+  "seed": 2,
+  "timesteps": 2000,
+  "observation_shape": [
+    98
+  ],
+  "post_training_final_evaluation": {
+    "step": 2048,
+    "mean_reward": 226.36445258009755,
+    "success_rate": 0.9921875,
+    "phase": "post_training_final"
+  }
+}

@@ -32,3 +32,4 @@ MIN_CALLS_PER_CELL = 5 # a (stage, candidate, window) cell with fewer calls is i
 # Role 1 uses these in the reward; you use them in the evaluation. Change once, here.
 SLA_MULT = 2.0       # SLA violation  if end-to-end latency > SLA_MULT     x baseline median
 TIMEOUT_MULT = 4.0   # transaction FAILS if end-to-end latency > TIMEOUT_MULT x baseline median
+LATENCY_MULTIPLIER = 1.0  # global hook to scale sampled stage latencies during env rollouts
